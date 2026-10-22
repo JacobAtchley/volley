@@ -32,11 +32,16 @@ class SmsObserver(
         }
     }
 
+    /** Does nothing without READ_SMS; registering would throw and take the process down. */
     @Synchronized
     fun start() {
         if (registered) return
-        resolver.registerContentObserver(Telephony.Sms.CONTENT_URI, true, observer)
-        registered = true
+        registered = try {
+            resolver.registerContentObserver(Telephony.Sms.CONTENT_URI, true, observer)
+            true
+        } catch (e: SecurityException) {
+            false
+        }
     }
 
     @Synchronized

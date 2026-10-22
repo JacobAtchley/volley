@@ -31,6 +31,8 @@ struct StoredStatus: Equatable {
 protocol MessageStore: AnyObject {
     func upsert(_ records: [SmsRecord], deviceId: String)
     func lastPhoneId(deviceId: String) -> Int64
+    /// Phone ids of outgoing messages still waiting to send, so a sync can learn how they settled.
+    func pendingPhoneIds(deviceId: String) -> [Int64]
     func conversations(deviceId: String) -> [ConversationSummary]
     func messages(deviceId: String, threadId: Int64) -> [StoredMessage]
     func threadId(deviceId: String, address: String) -> Int64?
@@ -118,6 +120,13 @@ final class GRDBMessageStore: MessageStore {
         read { db in
             try Int64.fetchOne(db, sql: "SELECT MAX(phone_id) FROM messages WHERE device_id = ?", arguments: [deviceId])
         }.flatMap { $0 } ?? 0
+    }
+
+    func pendingPhoneIds(deviceId: String) -> [Int64] {
+        read { db in
+            try Int64.fetchAll(db, sql: "SELECT phone_id FROM messages WHERE device_id = ? AND status = 'pending' ORDER BY phone_id",
+                               arguments: [deviceId])
+        } ?? []
     }
 
     func conversations(deviceId: String) -> [ConversationSummary] {

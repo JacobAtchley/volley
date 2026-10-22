@@ -30,7 +30,7 @@ The Mac is the server; the phone is the client.
 | `sms.received`         | phone → mac  | `address`, `body`, `receivedAt` |
 | `sms.send`             | mac → phone  | `requestId`, `address`, `body`, `threadId?` |
 | `sms.sent`             | phone → mac  | `requestId`, `ok`, `error?` |
-| `sms.sync`             | mac → phone  | `sinceId` (phone SMS `_id`, 0 if none), `sinceTime` (epoch ms) |
+| `sms.sync`             | mac → phone  | `sinceId` (phone SMS `_id`, 0 if none), `sinceTime` (epoch ms), `pendingIds` (ids the Mac holds as pending) |
 | `sms.batch`            | phone → mac  | `messages` (`[SmsRecord]`), `done` |
 | `device.status`        | phone → mac  | `battery` (0–100), `charging`, `cellLevel?` (0–4), `wifiLevel?` (0–4), `wifiConnected` |
 

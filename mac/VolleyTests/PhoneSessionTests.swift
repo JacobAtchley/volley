@@ -118,4 +118,22 @@ final class PhoneSessionTests: XCTestCase {
         XCTAssertNil(session.openThreadId)
         XCTAssertNil(session.currentDevice)
     }
+
+    func testHelloSyncIncludesStoredPendingIds() {
+        store.upsert([sms(4, outgoing: true, status: "pending"), sms(9)], deviceId: "d1")
+        connect()
+        XCTAssertEqual(transport.sentBodies(MsgType.smsSync, as: SmsSync.self).map(\.pendingIds), [[4]])
+    }
+
+    func testUnpairWhileConnectedIgnoresLateFrames() {
+        connect()
+        session.unpair(PairedDevice(id: "d1", name: "Pixel"))
+        // The socket closes asynchronously; frames already in flight must not resurrect the device.
+        deliver(MsgType.smsBatch, SmsBatch(messages: [sms(1)], done: true))
+        deliver(MsgType.deviceStatus, DeviceStatus(battery: 1, charging: false, cellLevel: nil, wifiLevel: nil,
+                                                   wifiConnected: false))
+        transport.onEvent?(.closed(conn))
+        XCTAssertEqual(store.lastPhoneId(deviceId: "d1"), 0)
+        XCTAssertNil(store.status(deviceId: "d1"))
+    }
 }

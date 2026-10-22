@@ -127,7 +127,12 @@ final class PhoneSession {
         store.deleteDevice(device.id)
         if defaults.string(forKey: Self.lastDeviceKey) == device.id { defaults.removeObject(forKey: Self.lastDeviceKey) }
         pairedDevices = trust.all()
-        if let active, active.deviceId == device.id { transport.close(active.conn) }
+        if let current = active, current.deviceId == device.id {
+            // Forget it now: the socket closes asynchronously and frames still in flight must be ignored.
+            active = nil
+            status = .waiting
+            transport.close(current.conn)
+        }
         if currentDevice?.id == device.id {
             pendingSends.removeAll()
             openThreadId = nil
@@ -289,7 +294,8 @@ final class PhoneSession {
     private func requestSync(_ deviceId: String) {
         let midnight = Calendar.current.startOfDay(for: Date())
         _ = send(MsgType.smsSync, SmsSync(sinceId: store.lastPhoneId(deviceId: deviceId),
-                                          sinceTime: Int64(midnight.timeIntervalSince1970 * 1000)))
+                                          sinceTime: Int64(midnight.timeIntervalSince1970 * 1000),
+                                          pendingIds: store.pendingPhoneIds(deviceId: deviceId)))
     }
 
     @discardableResult

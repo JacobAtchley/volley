@@ -48,7 +48,7 @@ struct NotificationKey: Codable { let key: String }
 struct SmsReceived: Codable { let address: String; let body: String; let receivedAt: Int64 }
 struct SmsSend: Codable { let requestId: String; let address: String; let body: String; var threadId: Int64? = nil }
 struct SmsSent: Codable { let requestId: String; let ok: Bool; let error: String? }
-struct SmsSync: Codable { let sinceId: Int64; let sinceTime: Int64 }
+struct SmsSync: Codable { let sinceId: Int64; let sinceTime: Int64; var pendingIds: [Int64] = [] }
 struct SmsBatch: Codable { let messages: [SmsRecord]; let done: Bool }
 struct SmsRecord: Codable, Equatable {
     let id: Int64

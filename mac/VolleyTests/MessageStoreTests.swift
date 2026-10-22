@@ -54,4 +54,11 @@ final class MessageStoreTests: XCTestCase {
         XCTAssertNil(store.status(deviceId: "d1"))
         XCTAssertEqual(store.conversations(deviceId: "d2").count, 1)
     }
+
+    func testPendingPhoneIds() {
+        store.upsert([sms(1, outgoing: true, status: "pending"), sms(2, outgoing: true, status: "sent"),
+                      sms(3, outgoing: true, status: "pending")], deviceId: "d1")
+        store.upsert([sms(4, outgoing: true, status: "pending")], deviceId: "d2")
+        XCTAssertEqual(store.pendingPhoneIds(deviceId: "d1"), [1, 3])
+    }
 }

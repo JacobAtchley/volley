@@ -53,7 +53,7 @@ class SmsSendHandler(
 class SmsSyncHandler(private val syncer: SmsSyncer) : MessageHandler {
     override fun handle(envelope: app.volley.android.protocol.Envelope) {
         val req = envelope.bodyAs<SmsSync>() ?: return
-        syncer.syncFrom(req.sinceId, req.sinceTime)
+        syncer.syncFrom(req.sinceId, req.sinceTime, req.pendingIds)
     }
 }
 

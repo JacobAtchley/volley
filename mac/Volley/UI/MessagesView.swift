@@ -17,8 +17,9 @@ struct MessagesView: View {
                 ConversationList(session: session)
                     .navigationSplitViewColumnWidth(min: 240, ideal: 280)
             } detail: {
-                if session.openThreadId != nil {
-                    ChatView(session: session)
+                if let threadId = session.openThreadId {
+                    // New identity per conversation so a draft never carries over to another thread.
+                    ChatView(session: session).id(threadId)
                 } else {
                     Placeholder(text: "Choose a conversation")
                 }
@@ -53,7 +54,7 @@ private struct PhoneCard: View {
                 Circle().fill(connected ? Color.green : Color.muted).frame(width: 8, height: 8)
                     .accessibilityLabel(connected ? "Online" : "Offline")
             }
-            if connected, let s = status?.status {
+            if let s = status?.status {
                 HStack(spacing: 14) {
                     Label {
                         Text("\(s.battery)%")
@@ -65,13 +66,17 @@ private struct PhoneCard: View {
                 }
                 .font(.callout)
                 .labelStyle(.titleAndIcon)
-            } else if connected {
-                Text("Online").font(.callout).foregroundStyle(Color.muted)
-            } else if let seen = status?.lastSeen {
-                Text("Offline · last seen \(seen, format: .relative(presentation: .named))")
-                    .font(.callout).foregroundStyle(Color.muted)
-            } else {
-                Text("Offline").font(.callout).foregroundStyle(Color.muted)
+                .opacity(connected ? 1 : 0.55)
+            }
+            if !connected {
+                Group {
+                    if let seen = status?.lastSeen {
+                        Text("Offline · last seen \(seen, format: .relative(presentation: .named))")
+                    } else {
+                        Text("Offline")
+                    }
+                }
+                .font(.callout).foregroundStyle(Color.muted)
             }
         }
         .padding(.vertical, 6)

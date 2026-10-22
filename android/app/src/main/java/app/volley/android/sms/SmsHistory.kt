@@ -56,12 +56,15 @@ class SmsSyncer(
     private var floor = 0L
     private var pendingIds = emptySet<Long>()
 
+    /** [macPendingIds] are rows the Mac holds as pending; they're resent so it learns how they settled. */
     @Synchronized
-    fun syncFrom(sinceId: Long, sinceTime: Long) {
-        val records = toRecords(source.since(sinceId, sinceTime))
+    fun syncFrom(sinceId: Long, sinceTime: Long, macPendingIds: Collection<Long> = emptyList()) {
+        val fresh = toRecords(source.since(sinceId, sinceTime))
+        val old = toRecords(source.byIds(macPendingIds.filter { it <= sinceId }))
+        val records = old + fresh
         val chunks = records.chunked(CHUNK).ifEmpty { listOf(emptyList()) }
         chunks.forEachIndexed { i, chunk -> sendBatch(chunk, done = i == chunks.lastIndex) }
-        cursor = maxOf(sinceId, records.maxOfOrNull { it.id } ?: 0)
+        cursor = maxOf(sinceId, fresh.maxOfOrNull { it.id } ?: 0)
         floor = sinceTime
         pendingIds = records.pendingIds()
     }

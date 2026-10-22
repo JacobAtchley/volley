@@ -52,7 +52,7 @@ data class NotificationPosted(
 @Serializable data class SmsReceived(val address: String, val body: String, val receivedAt: Long)
 @Serializable data class SmsSend(val requestId: String, val address: String, val body: String, val threadId: Long? = null)
 @Serializable data class SmsSent(val requestId: String, val ok: Boolean, val error: String? = null)
-@Serializable data class SmsSync(val sinceId: Long, val sinceTime: Long)
+@Serializable data class SmsSync(val sinceId: Long, val sinceTime: Long, val pendingIds: List<Long> = emptyList())
 @Serializable data class SmsBatch(val messages: List<SmsRecord>, val done: Boolean)
 
 @Serializable

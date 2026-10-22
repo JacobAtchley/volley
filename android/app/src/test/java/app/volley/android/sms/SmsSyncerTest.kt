@@ -107,4 +107,21 @@ class SmsSyncerTest {
         syncer.onChanged()
         assertTrue(frames.isEmpty())
     }
+
+    @Test
+    fun syncFrom_resendsRowsTheMacStillHasPending() {
+        source.rows = listOf(row(5, type = 2), row(9))
+        syncer.syncFrom(9, 0, macPendingIds = listOf(5))
+        assertEquals(listOf(5L to "sent"), batches.single().messages.map { it.id to it.status })
+    }
+
+    @Test
+    fun syncFrom_keepsWatchingMacPendingRows() {
+        source.rows = listOf(row(5, type = 4))
+        syncer.syncFrom(9, 0, macPendingIds = listOf(5))
+        frames.clear()
+        source.rows = listOf(row(5, type = 5))
+        syncer.onChanged()
+        assertEquals(listOf(5L to "failed"), batches.single().messages.map { it.id to it.status })
+    }
 }
