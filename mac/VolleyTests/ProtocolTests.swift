@@ -22,4 +22,23 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(body["sinceId"] as? Int, 42)
         XCTAssertEqual(body["sinceTime"] as? Int, 1000)
     }
+
+    func testDecodesNotificationBatch() throws {
+        let json = """
+        {"type":"notification.batch","id":"x","ts":1,"body":{"done":true,"activeKeys":["k1","k2"],"notifications":[
+          {"key":"k1","pkg":"com.slack","appName":"Slack","title":"Ana","text":"deploy is green","postedAt":1000}
+        ]}}
+        """
+        let batch = try XCTUnwrap(Codec.body(NotificationBatch.self, from: Data(json.utf8)))
+        XCTAssertEqual(batch.activeKeys, ["k1", "k2"])
+        XCTAssertEqual(batch.notifications, [NotificationPosted(key: "k1", pkg: "com.slack", appName: "Slack",
+                                                                title: "Ana", text: "deploy is green", postedAt: 1000)])
+    }
+
+    func testEncodesNotificationFilter() throws {
+        let data = try XCTUnwrap(Codec.encode(MsgType.notificationFilter, NotificationFilter(excludedPackages: ["com.slack"])))
+        let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(obj["type"] as? String, "notification.filter")
+        XCTAssertEqual((obj["body"] as? [String: Any])?["excludedPackages"] as? [String], ["com.slack"])
+    }
 }
