@@ -21,7 +21,8 @@ enum Composition {
         let identity = MacIdentity.load()
         let transport = LanServer(
             serviceName: identity.name,
-            txt: ["id": identity.id, "name": identity.name, "v": "1"]
+            txt: ["id": identity.id, "name": identity.name, "v": "1"],
+            port: 47_823
         )
         let notifier = UserNotifier()
         let session = PhoneSession(

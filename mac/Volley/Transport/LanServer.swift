@@ -27,12 +27,17 @@ final class LanServer: PhoneTransport {
 
     private let serviceName: String
     private let txt: [String: String]
+    /// Listen here when free. Phones cache the advertised port, and a Mac app that quits without
+    /// withdrawing its Bonjour record would otherwise come back on a new port they can't find.
+    private let preferredPort: UInt16?
     private let queue = DispatchQueue(label: "app.volley.lan")
     // Accessed only on `queue`.
     private var listener: NWListener?
     private var connections: [ConnectionID: NWConnection] = [:]
+    private var usePreferredPort = true
 
-    init(serviceName: String, txt: [String: String]) {
+    init(serviceName: String, txt: [String: String], port: UInt16? = nil) {
+        self.preferredPort = port
         self.serviceName = serviceName
         self.txt = txt
     }
@@ -78,7 +83,8 @@ final class LanServer: PhoneTransport {
             ws.autoReplyPing = true
             params.defaultProtocolStack.applicationProtocols.insert(ws, at: 0)
 
-            let l = try NWListener(using: params)
+            let fixed = usePreferredPort ? preferredPort.flatMap(NWEndpoint.Port.init(rawValue:)) : nil
+            let l = try fixed.map { try NWListener(using: params, on: $0) } ?? NWListener(using: params)
             l.service = NWListener.Service(name: serviceName, type: "_volley._tcp", domain: nil, txtRecord: NWTXTRecord(txt))
             l.stateUpdateHandler = { [weak self, weak l] state in
                 guard let self else { return }
@@ -86,9 +92,15 @@ final class LanServer: PhoneTransport {
                 case .ready:
                     if let port = l?.port?.rawValue { self.emit(.ready(port: port)) }
                 case .failed(let error):
-                    self.emit(.failed(error.localizedDescription))
                     self.listener?.cancel()
                     self.listener = nil
+                    if self.usePreferredPort, self.preferredPort != nil {
+                        // Preferred port is taken; take any free one.
+                        self.usePreferredPort = false
+                        self.startListener()
+                        return
+                    }
+                    self.emit(.failed(error.localizedDescription))
                     self.queue.asyncAfter(deadline: .now() + 3) { self.startListener() }
                 default:
                     break
@@ -98,6 +110,11 @@ final class LanServer: PhoneTransport {
             l.start(queue: queue)
             listener = l
         } catch {
+            if usePreferredPort, preferredPort != nil {
+                usePreferredPort = false
+                startListener()
+                return
+            }
             emit(.failed(error.localizedDescription))
         }
     }
