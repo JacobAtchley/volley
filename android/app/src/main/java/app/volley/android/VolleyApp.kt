@@ -14,6 +14,7 @@ import app.volley.android.sms.SmsSendHandler
 import app.volley.android.sms.SmsSyncHandler
 import app.volley.android.sms.SmsSyncer
 import app.volley.android.sms.SystemSmsSender
+import app.volley.android.status.DeviceStatusReporter
 import app.volley.android.transport.LanTransportFactory
 import app.volley.android.transport.MacDiscovery
 import app.volley.android.transport.NsdMacDiscovery
@@ -65,16 +66,19 @@ class AppGraph(context: Context) {
         send = { session.send(it) },
     )
     private val smsObserver = SmsObserver(context.contentResolver, scope) { syncer.onChanged() }
+    private val statusReporter = DeviceStatusReporter(context, scope) { session.send(it) }
 
     init {
         session.on(MsgType.SMS_SYNC, SmsSyncHandler(syncer))
-        // Stream SMS changes only while a Mac is connected; it asks for a fresh sync each time.
+        // Stream SMS changes and phone status only while a Mac is connected; it asks for a fresh sync each time.
         scope.launch {
             session.state.collect { state ->
                 if (state is SessionState.Connected) {
                     smsObserver.start()
+                    statusReporter.start()
                 } else {
                     smsObserver.stop()
+                    statusReporter.stop()
                     syncer.reset()
                 }
             }
