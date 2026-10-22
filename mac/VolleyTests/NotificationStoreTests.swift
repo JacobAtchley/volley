@@ -94,4 +94,11 @@ final class NotificationStoreTests: XCTestCase {
         store.upsertNotification(posted(at: 2_000), deviceId: "d1", receivedAt: t0)
         XCTAssertEqual(store.notifications(deviceId: "d1").map(\.cleared), [false])
     }
+
+    func testResyncDoesNotRenewReceivedAt() {
+        // Every reconnect resends what's still showing; that must not make read items "new" again.
+        store.upsertNotification(posted(at: 1_000), deviceId: "d1", receivedAt: t0)
+        store.upsertNotification(posted(at: 1_000), deviceId: "d1", receivedAt: t0.addingTimeInterval(600))
+        XCTAssertEqual(store.notifications(deviceId: "d1").map(\.receivedAt), [t0])
+    }
 }

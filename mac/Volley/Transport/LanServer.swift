@@ -90,6 +90,8 @@ final class LanServer: PhoneTransport {
                 guard let self else { return }
                 switch state {
                 case .ready:
+                    // A fallback is for this start only; try the preferred port again next time.
+                    self.usePreferredPort = true
                     if let port = l?.port?.rawValue { self.emit(.ready(port: port)) }
                 case .failed(let error):
                     self.listener?.cancel()

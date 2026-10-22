@@ -68,12 +68,15 @@ final class HashedTrustStore: TrustStore {
         let pending = lock.withLock { index.keys.filter { hashes[$0] == nil } }
         for deviceId in pending {
             guard let token = legacy.token(for: deviceId) else { continue }
-            lock.withLock {
+            // The read may have waited on a prompt; the phone could have re-paired or been removed meanwhile.
+            let migrated = lock.withLock {
                 var h = hashes
+                guard h[deviceId] == nil, index[deviceId] != nil else { return false }
                 h[deviceId] = Self.hash(token)
                 defaults.set(h, forKey: hashesKey)
+                return true
             }
-            legacy.delete(deviceId: deviceId)
+            if migrated { legacy.delete(deviceId: deviceId) }
         }
     }
 

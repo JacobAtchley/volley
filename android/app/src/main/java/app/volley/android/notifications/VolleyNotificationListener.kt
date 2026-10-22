@@ -11,6 +11,7 @@ import app.volley.android.protocol.MsgType
 import app.volley.android.protocol.NotificationKey
 import app.volley.android.protocol.NotificationSync
 import app.volley.android.protocol.bodyAs
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Mirrors phone notifications to the Mac. Its system binding also keeps the process
@@ -22,7 +23,8 @@ class VolleyNotificationListener : NotificationListenerService() {
     private val forwarded = object : LinkedHashMap<String, Int>(64, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Int>) = size > MAX_TRACKED
     }
-    private val appNames = HashMap<String, String>()
+    // Written from the main thread (posts) and the session thread (sync).
+    private val appNames = ConcurrentHashMap<String, String>()
 
     override fun onListenerConnected() {
         val session = graph.session

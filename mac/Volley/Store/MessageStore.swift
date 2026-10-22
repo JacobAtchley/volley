@@ -271,8 +271,9 @@ final class GRDBMessageStore: MessageStore {
                 ON CONFLICT (device_id, key, content_hash) DO UPDATE SET
                     -- A newer post of the same text means it's showing on the phone again.
                     cleared = CASE WHEN excluded.posted_at > posted_at THEN 0 ELSE cleared END,
-                    posted_at = MAX(posted_at, excluded.posted_at),
-                    received_at = MAX(received_at, excluded.received_at)
+                    -- Only a genuinely newer post is "received" again; a reconnect resend is not new.
+                    received_at = CASE WHEN excluded.posted_at > posted_at THEN excluded.received_at ELSE received_at END,
+                    posted_at = MAX(posted_at, excluded.posted_at)
                 """, arguments: [deviceId, n.key, Self.contentHash(n), n.postedAt, n.pkg, n.appName, n.title, n.text,
                                  Self.millis(receivedAt)])
         }
