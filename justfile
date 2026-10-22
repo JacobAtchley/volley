@@ -45,6 +45,7 @@ deploy:
 # Open the macOS app (quits a running copy first)
 open:
     -pkill -x Volley
+    @while pgrep -x Volley >/dev/null; do sleep 0.2; done
     open "{{mac_app}}"
 
 # Remove build outputs
