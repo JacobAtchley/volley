@@ -28,6 +28,9 @@ object MsgType {
     const val SMS_RECEIVED = "sms.received"
     const val SMS_SEND = "sms.send"
     const val SMS_SENT = "sms.sent"
+    const val SMS_SYNC = "sms.sync"
+    const val SMS_BATCH = "sms.batch"
+    const val DEVICE_STATUS = "device.status"
 }
 
 @Serializable data class PairRequest(val deviceId: String, val deviceName: String, val code: String)
@@ -47,8 +50,31 @@ data class NotificationPosted(
 
 @Serializable data class NotificationKey(val key: String)
 @Serializable data class SmsReceived(val address: String, val body: String, val receivedAt: Long)
-@Serializable data class SmsSend(val requestId: String, val address: String, val body: String)
+@Serializable data class SmsSend(val requestId: String, val address: String, val body: String, val threadId: Long? = null)
 @Serializable data class SmsSent(val requestId: String, val ok: Boolean, val error: String? = null)
+@Serializable data class SmsSync(val sinceId: Long, val sinceTime: Long)
+@Serializable data class SmsBatch(val messages: List<SmsRecord>, val done: Boolean)
+
+@Serializable
+data class SmsRecord(
+    val id: Long,
+    val threadId: Long,
+    val address: String,
+    val contactName: String? = null,
+    val body: String,
+    val date: Long,
+    val outgoing: Boolean,
+    val status: String,
+)
+
+@Serializable
+data class DeviceStatus(
+    val battery: Int,
+    val charging: Boolean,
+    val cellLevel: Int? = null,
+    val wifiLevel: Int? = null,
+    val wifiConnected: Boolean,
+)
 
 object Codec {
     val json = Json {

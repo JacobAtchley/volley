@@ -29,7 +29,8 @@ enum Composition {
             trust: KeychainTrustStore(),
             notifier: UserNotifier()
         )
-        session.start()
+        // Unit tests host the app; don't advertise or listen while they run.
+        if NSClassFromString("XCTestCase") == nil { session.start() }
         return session
     }
 }

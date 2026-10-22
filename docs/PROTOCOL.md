@@ -28,8 +28,29 @@ The Mac is the server; the phone is the client.
 | `notification.removed` | phone → mac  | `key` |
 | `notification.dismiss` | mac → phone  | `key` |
 | `sms.received`         | phone → mac  | `address`, `body`, `receivedAt` |
-| `sms.send`             | mac → phone  | `requestId`, `address`, `body` |
+| `sms.send`             | mac → phone  | `requestId`, `address`, `body`, `threadId?` |
 | `sms.sent`             | phone → mac  | `requestId`, `ok`, `error?` |
+| `sms.sync`             | mac → phone  | `sinceId` (phone SMS `_id`, 0 if none), `sinceTime` (epoch ms) |
+| `sms.batch`            | phone → mac  | `messages` (`[SmsRecord]`), `done` |
+| `device.status`        | phone → mac  | `battery` (0–100), `charging`, `cellLevel?` (0–4), `wifiLevel?` (0–4), `wifiConnected` |
+
+`SmsRecord`: `id` (phone SMS `_id`), `threadId`, `address`, `contactName?`, `body`, `date` (epoch ms),
+`outgoing`, `status` (`received` | `sent` | `pending` | `failed`). Text SMS only; MMS is not synced.
+
+## SMS history sync
+
+1. After `hello.ok` / `pair.result`, the Mac sends `sms.sync` with the highest `_id` it has stored for this
+   phone and `sinceTime` = local midnight today. The phone never sends rows older than `sinceTime`.
+2. The phone replies with `sms.batch` frames of up to 200 records; the last has `done: true`
+   (an empty result is one empty `done` batch).
+3. While connected, the phone observes its SMS provider and sends further `sms.batch` frames (`done: true`)
+   with new rows, plus rows previously sent as `pending` whose status has since changed.
+4. The Mac upserts records by (phone, `id`), so resending a row updates it.
+
+`sms.received` is still sent for incoming SMS; the Mac uses it only for desktop notifications.
+
+The phone sends `device.status` once after authenticating and then when a value changes,
+at most every 30 s (a charging change is sent immediately).
 
 Liveness uses WebSocket ping/pong frames, not envelopes.
 
