@@ -3,7 +3,10 @@ package app.volley.android
 import android.app.Application
 import android.content.Context
 import android.os.Build
+import app.volley.android.notifications.ExcludedPackages
 import app.volley.android.protocol.MsgType
+import app.volley.android.protocol.NotificationFilter
+import app.volley.android.protocol.bodyAs
 import app.volley.android.session.PairingStore
 import app.volley.android.session.SessionManager
 import app.volley.android.session.SessionState
@@ -48,6 +51,7 @@ class AppGraph(context: Context) {
         .build()
 
     val pairing = PairingStore(context)
+    val excludedPackages = ExcludedPackages(context)
     val discovery: MacDiscovery = NsdMacDiscovery(context)
 
     val session = SessionManager(
@@ -70,6 +74,9 @@ class AppGraph(context: Context) {
 
     init {
         session.on(MsgType.SMS_SYNC, SmsSyncHandler(syncer))
+        session.on(MsgType.NOTIFICATION_FILTER) { env ->
+            env.bodyAs<NotificationFilter>()?.let { excludedPackages.set(it.excludedPackages.toSet()) }
+        }
         // Stream SMS changes and phone status only while a Mac is connected; it asks for a fresh sync each time.
         scope.launch {
             session.state.collect { state ->
