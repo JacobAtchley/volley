@@ -65,7 +65,21 @@ struct MenuView: View {
     }
 
     private var notifications: some View {
-        Text("\(session.newNotificationCount) new notifications").font(.callout)
+        let n = session.newNotificationCount
+        return Button {
+            MainWindow.show(session: session, area: .notifications)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "bell.badge").foregroundStyle(Color.coral)
+                Text("\(n) new notification\(n == 1 ? "" : "s")").font(.callout.weight(.medium))
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(Color.muted)
+            }
+            .padding(10)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 10))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var footer: some View {

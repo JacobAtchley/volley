@@ -7,8 +7,12 @@ import SwiftUI
 enum MainWindow {
     private static var window: NSWindow?
 
-    static func show(session: PhoneSession, threadId: Int64? = nil) {
-        if let threadId { session.open(threadId: threadId) }
+    static func show(session: PhoneSession, threadId: Int64? = nil, area: PhoneArea? = nil) {
+        if let threadId {
+            session.select(area: .sms)
+            session.open(threadId: threadId)
+        }
+        if let area { session.select(area: area) }
         let w = window ?? make(session)
         window = w
         NSApp.activate(ignoringOtherApps: true)
@@ -25,6 +29,9 @@ enum MainWindow {
         w.isReleasedWhenClosed = false
         if !w.setFrameUsingName("VolleyMain") { w.center() }
         w.setFrameAutosaveName("VolleyMain")
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
+            MainActor.assumeIsolated { session.windowClosed() }
+        }
         return w
     }
 }
