@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Volley mark: an arc served from one dot to another. 108dp adaptive canvas, art inside the 66dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M34.4,67.4 Q54,25.1 73.6,67.4"
+        android:strokeColor="#2A1F1D"
+        android:strokeWidth="5.2"
+        android:strokeLineCap="round" />
+    <path
+        android:fillColor="#2A1F1D"
+        android:pathData="M29.2,67.4 a5.2,5.2 0 1,0 10.4,0 a5.2,5.2 0 1,0 -10.4,0 Z" />
+    <path
+        android:fillColor="#2A1F1D"
+        android:pathData="M68.4,67.4 a5.2,5.2 0 1,0 10.4,0 a5.2,5.2 0 1,0 -10.4,0 Z" />
+</vector>

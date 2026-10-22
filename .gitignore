@@ -1,0 +1,14 @@
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.iml
+
+# Mac
+mac/Volley.xcodeproj/
+mac/build/
+DerivedData/
+xcuserdata/
+.DS_Store
