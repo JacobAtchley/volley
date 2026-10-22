@@ -1,14 +1,42 @@
-# Android
-android/.gradle/
-android/build/
-android/app/build/
-android/local.properties
-android/.idea/
-*.iml
+# ---------- Android / Gradle ----------
+.gradle/
+.kotlin/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+local.properties
+*.apk
+*.aab
+*.ap_
+*.dex
+*.hprof
+output-metadata.json
 
-# Mac
+# Signing (never commit keys)
+*.jks
+*.keystore
+keystore.properties
+google-services.json
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+.navigation/
+lint/intermediates/
+lint/generated/
+lint/outputs/
+lint/tmp/
+
+# ---------- macOS / Xcode ----------
 mac/Volley.xcodeproj/
-mac/build/
 DerivedData/
 xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+.swiftpm/
+.build/
+
+# ---------- OS ----------
 .DS_Store
+Thumbs.db
