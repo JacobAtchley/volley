@@ -1,9 +1,15 @@
 package app.volley.android.sms
 
+import android.content.ContentResolver
+import android.net.Uri
+import android.provider.ContactsContract.PhoneLookup
+import android.provider.Telephony.Sms
 import app.volley.android.protocol.Codec
 import app.volley.android.protocol.MsgType
 import app.volley.android.protocol.SmsBatch
 import app.volley.android.protocol.SmsRecord
+import java.util.Optional
+import java.util.concurrent.ConcurrentHashMap
 
 /** One row of the SMS provider. [type] is `Telephony.Sms.TYPE_*`. */
 data class SmsRow(
@@ -90,5 +96,52 @@ class SmsSyncer(
     private companion object {
         const val CHUNK = 200
         const val PENDING = "pending"
+    }
+}
+
+/** [SmsSource] backed by the system SMS provider. Returns nothing without READ_SMS. */
+class ContentResolverSmsSource(private val resolver: ContentResolver) : SmsSource {
+    override fun since(sinceId: Long, sinceTime: Long) =
+        query("${Sms._ID} > ? AND ${Sms.DATE} >= ? AND $TYPES", arrayOf(sinceId.toString(), sinceTime.toString()))
+
+    override fun byIds(ids: Collection<Long>): List<SmsRow> =
+        if (ids.isEmpty()) emptyList()
+        else query("${Sms._ID} IN (${ids.joinToString { "?" }}) AND $TYPES", ids.map { it.toString() }.toTypedArray())
+
+    private fun query(selection: String, args: Array<String>): List<SmsRow> = try {
+        resolver.query(Sms.CONTENT_URI, COLUMNS, selection, args, "${Sms._ID} ASC")?.use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    add(SmsRow(c.getLong(0), c.getLong(1), c.getString(2).orEmpty(), c.getString(3).orEmpty(), c.getLong(4), c.getInt(5)))
+                }
+            }
+        }.orEmpty()
+    } catch (e: SecurityException) {
+        emptyList()
+    }
+
+    private companion object {
+        val COLUMNS = arrayOf(Sms._ID, Sms.THREAD_ID, Sms.ADDRESS, Sms.BODY, Sms.DATE, Sms.TYPE)
+        const val TYPES = "${Sms.TYPE} IN (1, 2, 4, 5, 6)"
+    }
+}
+
+/** Contact names via PhoneLookup, cached for the app's lifetime. Returns null without READ_CONTACTS. */
+class PhoneLookupContactNames(private val resolver: ContentResolver) : ContactNames {
+    private val cache = ConcurrentHashMap<String, Optional<String>>()
+
+    override fun lookup(address: String): String? {
+        if (address.isBlank()) return null
+        cache[address]?.let { return it.orElse(null) }
+        val name = try {
+            val uri = Uri.withAppendedPath(PhoneLookup.CONTENT_FILTER_URI, Uri.encode(address))
+            resolver.query(uri, arrayOf(PhoneLookup.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
+        } catch (e: SecurityException) {
+            return null // don't cache: permission may be granted later
+        }
+        cache[address] = Optional.ofNullable(name)
+        return name
     }
 }
