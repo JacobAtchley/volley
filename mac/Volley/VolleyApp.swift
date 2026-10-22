@@ -27,10 +27,24 @@ enum Composition {
             identity: identity,
             transport: transport,
             trust: KeychainTrustStore(),
-            notifier: UserNotifier()
+            notifier: UserNotifier(),
+            store: makeStore()
         )
         // Unit tests host the app; don't advertise or listen while they run.
         if NSClassFromString("XCTestCase") == nil { session.start() }
         return session
+    }
+
+    private static func makeStore() -> MessageStore {
+        do {
+            let dir = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                                  appropriateFor: nil, create: true)
+                .appendingPathComponent("Volley", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            return try GRDBMessageStore(path: dir.appendingPathComponent("volley.sqlite").path)
+        } catch {
+            // Keep working for this launch rather than refusing to start.
+            return GRDBMessageStore.inMemory()
+        }
     }
 }
