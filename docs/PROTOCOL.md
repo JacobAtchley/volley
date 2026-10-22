@@ -47,6 +47,9 @@ The Mac is the server; the phone is the client.
    with new rows, plus rows previously sent as `pending` whose status has since changed.
 4. The Mac upserts records by (phone, `id`), so resending a row updates it.
 
+When the phone sends an `sms.send`, Android records it in the provider's sent box (verified on a Galaxy S24 Ultra,
+Android 14+: `creator=app.volley.android`), so the Mac's copy comes back through step 3 and replaces its optimistic one.
+
 `sms.received` is still sent for incoming SMS; the Mac uses it only for desktop notifications.
 
 The phone sends `device.status` once after authenticating and then when a value changes,

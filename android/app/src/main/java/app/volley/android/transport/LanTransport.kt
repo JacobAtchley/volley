@@ -1,5 +1,6 @@
 package app.volley.android.transport
 
+import android.util.Log
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -37,6 +38,7 @@ class LanTransport(client: OkHttpClient, endpoint: Endpoint) : Transport {
     )
 
     private fun finish(reason: String?) {
+        Log.i("VolleyTransport", "Closed: ${reason ?: "no reason"}")
         channel.trySend(TransportEvent.Closed(reason))
         channel.close()
     }

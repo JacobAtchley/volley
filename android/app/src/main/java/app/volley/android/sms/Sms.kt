@@ -3,6 +3,7 @@ package app.volley.android.sms
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import android.provider.Telephony
 import android.telephony.SmsManager
 import app.volley.android.graph
@@ -38,6 +39,7 @@ class SmsSendHandler(
     override fun handle(envelope: app.volley.android.protocol.Envelope) {
         val req = envelope.bodyAs<SmsSend>() ?: return
         val result = sender.send(req.address, req.body)
+        result.exceptionOrNull()?.let { Log.w("VolleySms", "Send failed", it) } ?: Log.i("VolleySms", "Sent")
         session.send(
             Codec.encode(
                 MsgType.SMS_SENT,
