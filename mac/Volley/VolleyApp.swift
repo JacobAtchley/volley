@@ -24,11 +24,14 @@ enum Composition {
             txt: ["id": identity.id, "name": identity.name, "v": "1"],
             port: 47_823
         )
+        let trust = HashedTrustStore(legacy: KeychainLegacyTokens())
+        // A Keychain read can block on a password prompt; never do it on the main thread.
+        DispatchQueue.global(qos: .utility).async { trust.migrateLegacyTokens() }
         let notifier = UserNotifier()
         let session = PhoneSession(
             identity: identity,
             transport: transport,
-            trust: KeychainTrustStore(),
+            trust: trust,
             notifier: notifier,
             store: makeStore()
         )

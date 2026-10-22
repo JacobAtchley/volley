@@ -73,6 +73,6 @@ Liveness uses WebSocket ping/pong frames, not envelopes.
 
 ## Security (v1 limitations)
 
-- The token is 32 random bytes (base64url), issued once at pairing; the Mac keeps it in the Keychain.
+- The token is 32 random bytes (base64url), issued once at pairing. The Mac stores only its SHA-256 hash (in its sandboxed preferences) and compares hashes in constant time; builds before this kept the token in the Keychain and migrate it on launch.
 - **v1 is plaintext `ws://` on the LAN.** Next step: TLS with a self-signed Mac certificate
   whose SHA-256 fingerprint is exchanged during pairing and pinned on the phone.

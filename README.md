@@ -11,7 +11,7 @@ docs/      PROTOCOL.md: the JSON wire protocol shared by both
 ## How it works
 
 1. The Mac app advertises `_volley._tcp` on your network and listens for a WebSocket.
-2. The phone finds it, pairs once with a 6-digit code, and gets a token (stored in the Mac's Keychain).
+2. The phone finds it, pairs once with a 6-digit code, and gets a token (the Mac keeps only a hash of it).
 3. After that the phone reconnects on its own and streams `notification.posted` / `sms.received`.
    Replies and "Dismiss on phone" go back as `sms.send` / `notification.dismiss`.
 
