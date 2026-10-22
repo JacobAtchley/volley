@@ -92,16 +92,22 @@ private fun VolleyScreen() {
     val pairing by graph.pairing.pairing.collectAsStateWithLifecycle()
 
     var smsGranted by remember { mutableStateOf(false) }
+    var contactsGranted by remember { mutableStateOf(false) }
     var listenerEnabled by remember { mutableStateOf(false) }
     LifecycleResumeEffect(Unit) {
         smsGranted = SMS_PERMISSIONS.all {
             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
         }
+        contactsGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) ==
+            PackageManager.PERMISSION_GRANTED
         listenerEnabled = context.packageName in NotificationManagerCompat.getEnabledListenerPackages(context)
         onPauseOrDispose { }
     }
     val smsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
         smsGranted = r.values.all { it }
+    }
+    val contactsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        contactsGranted = it
     }
 
     Column(
@@ -118,6 +124,7 @@ private fun VolleyScreen() {
 
         Section("Permissions") {
             PermissionRow("Text messages", smsGranted) { smsLauncher.launch(SMS_PERMISSIONS) }
+            PermissionRow("Contacts", contactsGranted) { contactsLauncher.launch(Manifest.permission.READ_CONTACTS) }
             PermissionRow("Notification access", listenerEnabled) {
                 context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             }
@@ -231,4 +238,8 @@ private fun SessionState.label(): String = when (this) {
     is SessionState.Failed -> message
 }
 
-private val SMS_PERMISSIONS = arrayOf(Manifest.permission.RECEIVE_SMS, Manifest.permission.SEND_SMS)
+private val SMS_PERMISSIONS = arrayOf(
+    Manifest.permission.RECEIVE_SMS,
+    Manifest.permission.SEND_SMS,
+    Manifest.permission.READ_SMS,
+)

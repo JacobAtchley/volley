@@ -3,6 +3,7 @@ package app.volley.android.sms
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import android.provider.Telephony
 import android.telephony.SmsManager
 import app.volley.android.graph
@@ -11,6 +12,7 @@ import app.volley.android.protocol.MsgType
 import app.volley.android.protocol.SmsReceived
 import app.volley.android.protocol.SmsSend
 import app.volley.android.protocol.SmsSent
+import app.volley.android.protocol.SmsSync
 import app.volley.android.protocol.bodyAs
 import app.volley.android.session.MessageHandler
 import app.volley.android.session.SessionManager
@@ -37,12 +39,21 @@ class SmsSendHandler(
     override fun handle(envelope: app.volley.android.protocol.Envelope) {
         val req = envelope.bodyAs<SmsSend>() ?: return
         val result = sender.send(req.address, req.body)
+        result.exceptionOrNull()?.let { Log.w("VolleySms", "Send failed", it) } ?: Log.i("VolleySms", "Sent")
         session.send(
             Codec.encode(
                 MsgType.SMS_SENT,
                 SmsSent(req.requestId, result.isSuccess, result.exceptionOrNull()?.message),
             ),
         )
+    }
+}
+
+/** Handles `sms.sync` from the Mac. */
+class SmsSyncHandler(private val syncer: SmsSyncer) : MessageHandler {
+    override fun handle(envelope: app.volley.android.protocol.Envelope) {
+        val req = envelope.bodyAs<SmsSync>() ?: return
+        syncer.syncFrom(req.sinceId, req.sinceTime, req.pendingIds)
     }
 }
 

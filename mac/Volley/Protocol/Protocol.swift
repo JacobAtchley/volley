@@ -12,6 +12,9 @@ enum MsgType {
     static let smsReceived = "sms.received"
     static let smsSend = "sms.send"
     static let smsSent = "sms.sent"
+    static let smsSync = "sms.sync"
+    static let smsBatch = "sms.batch"
+    static let deviceStatus = "device.status"
 }
 
 struct EnvelopeHeader: Decodable {
@@ -43,8 +46,27 @@ struct NotificationPosted: Codable {
 }
 struct NotificationKey: Codable { let key: String }
 struct SmsReceived: Codable { let address: String; let body: String; let receivedAt: Int64 }
-struct SmsSend: Codable { let requestId: String; let address: String; let body: String }
+struct SmsSend: Codable { let requestId: String; let address: String; let body: String; var threadId: Int64? = nil }
 struct SmsSent: Codable { let requestId: String; let ok: Bool; let error: String? }
+struct SmsSync: Codable { let sinceId: Int64; let sinceTime: Int64; var pendingIds: [Int64] = [] }
+struct SmsBatch: Codable { let messages: [SmsRecord]; let done: Bool }
+struct SmsRecord: Codable, Equatable {
+    let id: Int64
+    let threadId: Int64
+    let address: String
+    let contactName: String?
+    let body: String
+    let date: Int64
+    let outgoing: Bool
+    let status: String
+}
+struct DeviceStatus: Codable, Equatable {
+    let battery: Int
+    let charging: Bool
+    let cellLevel: Int?
+    let wifiLevel: Int?
+    let wifiConnected: Bool
+}
 
 enum Codec {
     private static let decoder = JSONDecoder()

@@ -5,6 +5,8 @@ import UserNotifications
 protocol DesktopNotifier: AnyObject {
     var onReply: (@MainActor (_ address: String, _ text: String) -> Void)? { get set }
     var onDismiss: (@MainActor (_ key: String) -> Void)? { get set }
+    /// The user clicked an SMS notification itself (not an action button).
+    var onOpen: (@MainActor (_ address: String) -> Void)? { get set }
     func requestAuthorization()
     func showSms(from address: String, body: String)
     func showNotification(_ n: MirroredNotification)
@@ -14,6 +16,7 @@ protocol DesktopNotifier: AnyObject {
 final class UserNotifier: NSObject, DesktopNotifier, UNUserNotificationCenterDelegate {
     var onReply: (@MainActor (String, String) -> Void)?
     var onDismiss: (@MainActor (String) -> Void)?
+    var onOpen: (@MainActor (String) -> Void)?
 
     private let center = UNUserNotificationCenter.current()
 
@@ -91,6 +94,10 @@ final class UserNotifier: NSObject, DesktopNotifier, UNUserNotificationCenterDel
         } else if response.actionIdentifier == ID.dismiss, let key = info["key"] as? String {
             let handler = onDismiss
             DispatchQueue.main.async { MainActor.assumeIsolated { handler?(key) } }
+        } else if response.actionIdentifier == UNNotificationDefaultActionIdentifier,
+                  let address = info["address"] as? String {
+            let handler = onOpen
+            DispatchQueue.main.async { MainActor.assumeIsolated { handler?(address) } }
         }
         completionHandler()
     }

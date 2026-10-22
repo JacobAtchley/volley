@@ -27,10 +27,13 @@ brew install xcodegen
 cd mac && xcodegen && open Volley.xcodeproj
 ```
 Run it, then click the arc icon in the menu bar and choose **Pair a phone**. Allow notifications and local network access when macOS asks.
+Choose **Open Volley** for the messages window: your phone's battery, charging, cell and Wi-Fi status,
+today's text conversations, and a chat view to reply. Messages are kept on the Mac in
+`~/Library/Containers/app.volley.mac/Data/Library/Application Support/Volley/volley.sqlite`.
 
 **Android**
 Open `android/` in Android Studio and run on a device on the same Wi-Fi, or run `./gradlew installDebug`.
-In the app: grant **Text messages** and **Notification access**, pick your Mac and enter the code.
+In the app: grant **Text messages**, **Contacts** and **Notification access**, pick your Mac and enter the code.
 
 On Android 13+, a sideloaded app needs one extra step before you can grant Notification access:
 go to App info → ⋮ → **Allow restricted settings**.
@@ -41,5 +44,5 @@ go to App info → ⋮ → **Allow restricted settings**.
   certificate, pinned on the phone during pairing.
 - The phone's token is in plain SharedPreferences; it should move to the Android Keystore.
 - Google Play only allows SMS permissions for default SMS apps, so for now the Android app has to be sideloaded.
-- Contact names aren't resolved yet (you'll see phone numbers).
+- Only text SMS are mirrored; MMS (pictures, group chats) isn't yet. History starts from today when first synced.
 - Only one phone is connected at a time.

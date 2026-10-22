@@ -1,5 +1,6 @@
 package app.volley.android.session
 
+import android.util.Log
 import app.volley.android.protocol.Codec
 import app.volley.android.protocol.Envelope
 import app.volley.android.protocol.Hello
@@ -135,6 +136,7 @@ class SessionManager(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                Log.w(TAG, "Session failed", e)
                 _state.value = SessionState.Failed(e.message ?: "Connection error")
             }
             if (store.pairing.value == null) continue
@@ -192,6 +194,7 @@ class SessionManager(
     }
 
     private companion object {
+        const val TAG = "VolleySession"
         const val MAX_PENDING = 50
         const val MIN_BACKOFF_MS = 1_000L
         const val MAX_BACKOFF_MS = 30_000L

@@ -10,14 +10,11 @@ extension Color {
 
 struct MenuView: View {
     let session: PhoneSession
-    @State private var openThread: String?
-    @State private var draft = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
             pairing
-            if !session.conversations.isEmpty { messages }
             if !session.notifications.isEmpty { notifications }
             Divider()
             footer
@@ -30,6 +27,7 @@ struct MenuView: View {
 
     // MARK: Sections
 
+    @ViewBuilder
     private var header: some View {
         HStack(spacing: 10) {
             VolleyMark().frame(width: 28, height: 28)
@@ -38,6 +36,13 @@ struct MenuView: View {
             Circle().fill(statusColor).frame(width: 8, height: 8)
             Text(statusText).font(.callout).foregroundStyle(Color.muted)
         }
+        Button {
+            MainWindow.show(session: session)
+        } label: {
+            Label("Open Volley", systemImage: "bubble.left.and.bubble.right")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent).tint(.coral).foregroundStyle(Color.cocoa)
     }
 
     @ViewBuilder
@@ -56,19 +61,6 @@ struct MenuView: View {
                 Button("Pair a phone") { session.startPairing() }
                     .buttonStyle(.borderedProminent).tint(.coral).foregroundStyle(Color.cocoa)
             }
-        }
-    }
-
-    private var messages: some View {
-        section("Messages") {
-            ScrollView {
-                VStack(spacing: 6) {
-                    ForEach(session.conversations.prefix(15)) { convo in
-                        conversationRow(convo)
-                    }
-                }
-            }
-            .frame(maxHeight: 260)
         }
     }
 
@@ -117,57 +109,6 @@ struct MenuView: View {
                 Button("Quit Volley") { NSApplication.shared.terminate(nil) }.buttonStyle(.link)
             }
         }
-    }
-
-    // MARK: Rows
-
-    private func conversationRow(_ convo: Conversation) -> some View {
-        let isOpen = openThread == convo.address
-        return VStack(alignment: .leading, spacing: 6) {
-            Button {
-                openThread = isOpen ? nil : convo.address
-                draft = ""
-            } label: {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(convo.address).font(.callout.weight(.semibold))
-                        Text(convo.items.last?.body ?? "").font(.callout).lineLimit(isOpen ? nil : 1)
-                            .foregroundStyle(Color.muted)
-                    }
-                    Spacer()
-                    Text(convo.lastDate, style: .time).font(.caption).foregroundStyle(Color.muted)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if isOpen {
-                ForEach(convo.items.suffix(6)) { item in
-                    HStack {
-                        if item.outgoing { Spacer(minLength: 40) }
-                        Text(item.body + (item.failed ? "  (not sent)" : ""))
-                            .font(.callout)
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .background(item.outgoing ? Color.coral : Color.blush, in: RoundedRectangle(cornerRadius: 10))
-                        if !item.outgoing { Spacer(minLength: 40) }
-                    }
-                }
-                HStack {
-                    TextField("Reply", text: $draft)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit(send)
-                    Button("Send", action: send).disabled(draft.isEmpty)
-                }
-            }
-        }
-        .padding(10)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    private func send() {
-        guard let address = openThread else { return }
-        session.sendSms(to: address, body: draft)
-        draft = ""
     }
 
     // MARK: Building blocks

@@ -4,11 +4,17 @@ options:
   bundleIdPrefix: app.volley
   deploymentTarget:
     macOS: "14.0"
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift
+    from: 7.0.0
 targets:
   Volley:
     type: application
     platform: macOS
     sources: [Volley]
+    dependencies:
+      - package: GRDB
     info:
       path: Volley/Info.plist
       properties:
@@ -32,3 +38,24 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_IDENTITY: "-"
+  VolleyTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [VolleyTests]
+    dependencies:
+      - target: Volley
+      - package: GRDB
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_IDENTITY: "-"
+schemes:
+  Volley:
+    build:
+      targets:
+        Volley: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets: [VolleyTests]
