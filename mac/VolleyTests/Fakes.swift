@@ -33,7 +33,8 @@ final class FakeNotifier: DesktopNotifier {
     var onOpen: (@MainActor (String) -> Void)?
     func requestAuthorization() {}
     func showSms(from address: String, body: String) {}
-    func showNotification(_ n: MirroredNotification) {}
+    private(set) var shown: [MirroredNotification] = []
+    func showNotification(_ n: MirroredNotification) { shown.append(n) }
     func removeNotification(key: String) {}
 }
 

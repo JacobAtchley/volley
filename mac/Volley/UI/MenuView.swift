@@ -15,7 +15,7 @@ struct MenuView: View {
         VStack(alignment: .leading, spacing: 14) {
             header
             pairing
-            if !session.notifications.isEmpty { notifications }
+            if session.newNotificationCount > 0 { notifications }
             Divider()
             footer
         }
@@ -65,30 +65,7 @@ struct MenuView: View {
     }
 
     private var notifications: some View {
-        section("Notifications") {
-            ScrollView {
-                VStack(spacing: 6) {
-                    ForEach(session.notifications.prefix(20)) { n in
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(n.appName).font(.caption.weight(.semibold)).foregroundStyle(Color.muted)
-                                if !n.title.isEmpty { Text(n.title).font(.callout.weight(.semibold)).lineLimit(1) }
-                                Text(n.text).font(.callout).lineLimit(2)
-                            }
-                            Spacer()
-                            Button { session.dismiss(key: n.key) } label: {
-                                Image(systemName: "xmark").font(.caption)
-                            }
-                            .buttonStyle(.borderless)
-                            .accessibilityLabel("Dismiss on phone")
-                        }
-                        .padding(10)
-                        .background(Color.white, in: RoundedRectangle(cornerRadius: 10))
-                    }
-                }
-            }
-            .frame(maxHeight: 220)
-        }
+        Text("\(session.newNotificationCount) new notifications").font(.callout)
     }
 
     private var footer: some View {

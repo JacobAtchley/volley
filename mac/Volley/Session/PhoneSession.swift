@@ -44,6 +44,9 @@ struct MirroredNotification: Identifiable {
     let date: Date
 }
 
+/// A section of the window under the phone card.
+enum PhoneArea: Hashable { case sms, notifications }
+
 /// Authenticates the phone, routes its messages, and holds the UI state.
 @MainActor
 @Observable
@@ -62,7 +65,13 @@ final class PhoneSession {
     private(set) var conversations: [ConversationSummary] = []
     private(set) var openThreadId: Int64?
     private(set) var openThread: [ChatItem] = []
-    private(set) var notifications: [MirroredNotification] = []
+    private(set) var area: PhoneArea = .sms
+    /// Newest first, excluded apps left out.
+    private(set) var notificationHistory: [StoredNotification] = []
+    /// While the Notifications area is open: anything received after this is shown as New.
+    private(set) var newSince: Date?
+    private(set) var newNotificationCount = 0
+    private(set) var excludedApps: [AppRef] = []
     private(set) var pairedDevices: [PairedDevice] = []
     private(set) var pairingCode: String?
 
@@ -72,12 +81,12 @@ final class PhoneSession {
     private let notifier: DesktopNotifier
     private let store: MessageStore
     private let defaults: UserDefaults
+    private let now: () -> Date
     private let codes = PairingCodes()
     @ObservationIgnored private var unauthenticated = Set<ConnectionID>()
     @ObservationIgnored private var active: (conn: ConnectionID, deviceId: String)?
     @ObservationIgnored private var pendingSends: [PendingSend] = []
 
-    private static let maxNotifications = 50
     private static let lastDeviceKey = "lastDeviceId"
     /// How far apart a Mac send and the phone's stored copy may be timestamped and still match.
     private static let echoWindow: TimeInterval = 60
@@ -88,14 +97,16 @@ final class PhoneSession {
     }
 
     init(identity: MacIdentity, transport: PhoneTransport, trust: TrustStore, notifier: DesktopNotifier,
-         store: MessageStore, defaults: UserDefaults = .standard) {
+         store: MessageStore, defaults: UserDefaults = .standard, now: @escaping () -> Date = Date.init) {
         self.identity = identity
         self.transport = transport
         self.trust = trust
         self.notifier = notifier
         self.store = store
         self.defaults = defaults
+        self.now = now
         pairedDevices = trust.all()
+        excludedApps = store.excludedApps()
         refreshDevice()
 
         transport.onEvent = { [weak self] in self?.handle($0) }
@@ -162,6 +173,32 @@ final class PhoneSession {
     func dismiss(key: String) {
         _ = send(MsgType.notificationDismiss, NotificationKey(key: key))
         removeNotification(key)
+    }
+
+    func select(area newArea: PhoneArea) {
+        guard newArea != area else { return }
+        if area == .notifications { leaveNotifications() }
+        area = newArea
+        if newArea == .notifications, let deviceId = currentDevice?.id {
+            newSince = store.lastViewedNotifications(deviceId: deviceId) ?? .distantPast
+        }
+        reloadNotifications()
+    }
+
+    /// Closing the window counts as leaving the Notifications area; it reopens on SMS.
+    func windowClosed() {
+        select(area: .sms)
+    }
+
+    func seenApps() -> [AppRef] {
+        currentDevice.map { store.seenApps(deviceId: $0.id) } ?? excludedApps
+    }
+
+    func setExcluded(_ app: AppRef, _ excluded: Bool) {
+        store.setExcluded(app, excluded)
+        excludedApps = store.excludedApps()
+        _ = send(MsgType.notificationFilter, NotificationFilter(excludedPackages: excludedApps.map(\.pkg)))
+        reloadNotifications()
     }
 
     // MARK: - Transport events
@@ -235,13 +272,22 @@ final class PhoneSession {
     private func routeAuthenticated(_ type: String, _ data: Data) {
         switch type {
         case MsgType.notificationPosted:
-            guard let p = Codec.body(NotificationPosted.self, from: data) else { return }
-            let n = MirroredNotification(key: p.key, appName: p.appName, title: p.title, text: p.text,
-                                         date: Date(timeIntervalSince1970: TimeInterval(p.postedAt) / 1000))
-            notifications.removeAll { $0.key == n.key }
-            notifications.insert(n, at: 0)
-            if notifications.count > Self.maxNotifications { notifications.removeLast() }
-            notifier.showNotification(n)
+            guard let p = Codec.body(NotificationPosted.self, from: data), let deviceId = active?.deviceId,
+                  !isExcluded(p.pkg) else { return }
+            store.upsertNotification(p, deviceId: deviceId, receivedAt: now())
+            reloadNotifications()
+            notifier.showNotification(MirroredNotification(key: p.key, appName: p.appName, title: p.title, text: p.text,
+                                                           date: Date(timeIntervalSince1970: TimeInterval(p.postedAt) / 1000)))
+
+        case MsgType.notificationBatch:
+            // Catch-up after reconnecting: store quietly, no banners.
+            guard let batch = Codec.body(NotificationBatch.self, from: data), let deviceId = active?.deviceId else { return }
+            let receivedAt = now()
+            for p in batch.notifications where !isExcluded(p.pkg) {
+                store.upsertNotification(p, deviceId: deviceId, receivedAt: receivedAt)
+            }
+            store.clearNotifications(deviceId: deviceId, notIn: Set(batch.activeKeys))
+            reloadNotifications()
 
         case MsgType.notificationRemoved:
             guard let k = Codec.body(NotificationKey.self, from: data) else { return }
@@ -290,12 +336,15 @@ final class PhoneSession {
         refreshDevice()
     }
 
-    /// Asks the phone for messages we don't have yet, never older than local midnight.
+    /// Tells the phone what to skip, then asks for messages and notifications we don't have yet,
+    /// never older than local midnight.
     private func requestSync(_ deviceId: String) {
+        _ = send(MsgType.notificationFilter, NotificationFilter(excludedPackages: excludedApps.map(\.pkg)))
         let midnight = Calendar.current.startOfDay(for: Date())
         _ = send(MsgType.smsSync, SmsSync(sinceId: store.lastPhoneId(deviceId: deviceId),
                                           sinceTime: Int64(midnight.timeIntervalSince1970 * 1000),
                                           pendingIds: store.pendingPhoneIds(deviceId: deviceId)))
+        _ = send(MsgType.notificationSync, NotificationSync(sinceTime: Int64(midnight.timeIntervalSince1970 * 1000)))
     }
 
     @discardableResult
@@ -327,6 +376,31 @@ final class PhoneSession {
         conversations = store.conversations(deviceId: deviceId)
         deviceStatus = store.status(deviceId: deviceId)
         reloadThread()
+        reloadNotifications()
+    }
+
+    private func reloadNotifications() {
+        guard let deviceId = currentDevice?.id else {
+            notificationHistory = []
+            newNotificationCount = 0
+            return
+        }
+        notificationHistory = store.notifications(deviceId: deviceId)
+        if area == .notifications {
+            newNotificationCount = 0
+        } else {
+            let lastViewed = store.lastViewedNotifications(deviceId: deviceId) ?? .distantPast
+            newNotificationCount = notificationHistory.count { $0.receivedAt > lastViewed }
+        }
+    }
+
+    private func leaveNotifications() {
+        if let deviceId = currentDevice?.id { store.setLastViewedNotifications(deviceId: deviceId, at: now()) }
+        newSince = nil
+    }
+
+    private func isExcluded(_ pkg: String) -> Bool {
+        excludedApps.contains { $0.pkg == pkg }
     }
 
     private func reloadThread() {
@@ -354,7 +428,8 @@ final class PhoneSession {
     }
 
     private func removeNotification(_ key: String) {
-        notifications.removeAll { $0.key == key }
+        if let deviceId = currentDevice?.id { store.markNotificationCleared(deviceId: deviceId, key: key) }
+        reloadNotifications()
         notifier.removeNotification(key: key)
     }
 }
