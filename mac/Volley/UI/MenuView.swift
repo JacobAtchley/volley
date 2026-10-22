@@ -27,6 +27,7 @@ struct MenuView: View {
 
     // MARK: Sections
 
+    @ViewBuilder
     private var header: some View {
         HStack(spacing: 10) {
             VolleyMark().frame(width: 28, height: 28)
@@ -35,6 +36,13 @@ struct MenuView: View {
             Circle().fill(statusColor).frame(width: 8, height: 8)
             Text(statusText).font(.callout).foregroundStyle(Color.muted)
         }
+        Button {
+            MainWindow.show(session: session)
+        } label: {
+            Label("Open Volley", systemImage: "bubble.left.and.bubble.right")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent).tint(.coral).foregroundStyle(Color.cocoa)
     }
 
     @ViewBuilder

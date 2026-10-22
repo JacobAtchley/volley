@@ -23,13 +23,18 @@ enum Composition {
             serviceName: identity.name,
             txt: ["id": identity.id, "name": identity.name, "v": "1"]
         )
+        let notifier = UserNotifier()
         let session = PhoneSession(
             identity: identity,
             transport: transport,
             trust: KeychainTrustStore(),
-            notifier: UserNotifier(),
+            notifier: notifier,
             store: makeStore()
         )
+        notifier.onOpen = { [weak session] address in
+            guard let session else { return }
+            MainWindow.show(session: session, threadId: session.threadId(forAddress: address))
+        }
         // Unit tests host the app; don't advertise or listen while they run.
         if NSClassFromString("XCTestCase") == nil { session.start() }
         return session
