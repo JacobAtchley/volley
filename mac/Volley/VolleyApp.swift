@@ -35,6 +35,11 @@ enum Composition {
             notifier: notifier,
             store: makeStore()
         )
+        let files = FileSession(link: session)
+        session.files = files
+        session.onFileMessage = { files.handle(type: $0, data: $1) }
+        session.onBinary = { files.handleBinary($0) }
+        session.onDisconnect = { files.disconnected() }
         notifier.onOpen = { [weak session] address in
             guard let session else { return }
             MainWindow.show(session: session, threadId: session.threadId(forAddress: address))

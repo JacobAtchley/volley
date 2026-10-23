@@ -136,4 +136,17 @@ final class PhoneSessionTests: XCTestCase {
         XCTAssertEqual(store.lastPhoneId(deviceId: "d1"), 0)
         XCTAssertNil(store.status(deviceId: "d1"))
     }
+
+    func testRoutesFileMessagesAndBinaryToHooks() {
+        var routed: [String] = []
+        var binary: [Data] = []
+        session.onFileMessage = { type, _ in routed.append(type) }
+        session.onBinary = { binary.append($0) }
+        connect()
+        deliver(MsgType.fsStatus, FsStatus(allFilesAccess: true))
+        deliver(MsgType.fileAck, FileAck(transferId: "t", received: 1))
+        transport.onEvent?(.binary(conn, Data([7])))
+        XCTAssertEqual(routed, [MsgType.fsStatus, MsgType.fileAck])
+        XCTAssertEqual(binary, [Data([7])])
+    }
 }
