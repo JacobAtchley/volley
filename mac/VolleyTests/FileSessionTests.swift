@@ -263,4 +263,37 @@ final class FileSessionTests: XCTestCase {
         guard case .failed = files.transfers.first?.state else { return XCTFail("expected failure") }
         XCTAssertEqual(link.bodies(MsgType.fsCancel, as: FsCancel.self).map(\.transferId), [req.transferId])
     }
+
+    func testListingPagesAccumulateUntilDone() throws {
+        files.open(path: "DCIM/Camera")
+        let req = try XCTUnwrap(link.bodies(MsgType.fsList, as: FsList.self).last)
+        deliver(MsgType.fsListing, FsListing(requestId: req.requestId, path: "DCIM/Camera", entries: [entry("a.jpg")],
+                                             error: nil, done: false))
+        XCTAssertEqual(files.entries.map(\.name), ["a.jpg"])
+        XCTAssertTrue(files.loading)
+        deliver(MsgType.fsListing, FsListing(requestId: req.requestId, path: "DCIM/Camera", entries: [entry("b.jpg")],
+                                             error: nil, done: true))
+        XCTAssertEqual(files.entries.map(\.name), ["a.jpg", "b.jpg"])
+        XCTAssertFalse(files.loading)
+    }
+
+    func testThumbnailRequestsCappedAndCancellable() throws {
+        (0..<20).forEach { files.requestThumbnail(for: "p/\($0).jpg") }
+        var sent = link.bodies(MsgType.fsThumb, as: FsThumb.self)
+        XCTAssertEqual(sent.count, 12)
+        files.cancelThumbnail(for: "p/19.jpg")
+        deliver(MsgType.fsThumbData, FsThumbData(requestId: sent[0].requestId, jpegBase64: nil, error: "x"))
+        sent = link.bodies(MsgType.fsThumb, as: FsThumb.self)
+        XCTAssertEqual(sent.count, 13)
+        XCTAssertEqual(sent.last?.path, "p/18.jpg", "newest still-wanted request goes next")
+    }
+
+    func testTransferFinishedCallback() throws {
+        var finished: [(String, URL?)] = []
+        files.onTransferFinished = { item, url in finished.append((item.name, url)) }
+        files.download(["a.bin"], to: dir)
+        try serveDownload(Data([1]))
+        XCTAssertEqual(finished.map(\.0), ["a.bin"])
+        XCTAssertEqual(finished.first?.1?.lastPathComponent, "a.bin")
+    }
 }

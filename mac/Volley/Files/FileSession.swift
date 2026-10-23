@@ -51,6 +51,11 @@ final class FileSession {
     @ObservationIgnored private var listRequest: String?
     @ObservationIgnored private var listWaiters: [String: CheckedContinuation<[FsEntry]?, Never>] = [:]
     @ObservationIgnored private var thumbRequests: [String: String] = [:]
+    @ObservationIgnored private var thumbQueue: [String] = []
+    @ObservationIgnored private var firstPagePending = false
+    @ObservationIgnored private var pagesSoFar: [String: [FsEntry]] = [:]
+    /// Called when a transfer completes, with the saved file for downloads.
+    @ObservationIgnored var onTransferFinished: ((TransferItem, URL?) -> Void)?
     private typealias DeleteWaiter = (paths: [String], cont: CheckedContinuation<[FsDeleteFailure], Never>)
     @ObservationIgnored private var deleteWaiters: [String: DeleteWaiter] = [:]
     @ObservationIgnored private var jobs: [UUID: Job] = [:]
@@ -73,6 +78,7 @@ final class FileSession {
 
     private static let viewModesKey = "filesViewModes"
     private static let thumbPx = 256
+    private static let maxThumbsInFlight = 12
 
     init(link: FileLink, defaults: UserDefaults = .standard, tempDir: URL? = nil,
          open: @escaping (URL) -> Void = { NSWorkspace.shared.open($0) }) {
@@ -108,6 +114,7 @@ final class FileSession {
     func refresh() {
         let id = UUID().uuidString
         listRequest = id
+        firstPagePending = true
         loading = true
         error = nil
         if !link.sendMessage(MsgType.fsList, FsList(requestId: id, path: path, showHidden: showHidden)) {
@@ -116,11 +123,26 @@ final class FileSession {
         }
     }
 
+    /// Asks for a preview when a tile scrolls into view. At most 12 are in flight; the rest wait newest-first,
+    /// so whatever is on screen now is served before tiles scrolled past earlier.
     func requestThumbnail(for entryPath: String) {
         guard thumbnails[entryPath] == nil, !thumbRequests.values.contains(entryPath) else { return }
-        let id = UUID().uuidString
-        thumbRequests[id] = entryPath
-        link.sendMessage(MsgType.fsThumb, FsThumb(requestId: id, path: entryPath, maxPx: Self.thumbPx))
+        thumbQueue.removeAll { $0 == entryPath }
+        thumbQueue.append(entryPath)
+        pumpThumbnails()
+    }
+
+    /// The tile scrolled away before its preview was requested: don't ask for it.
+    func cancelThumbnail(for entryPath: String) {
+        thumbQueue.removeAll { $0 == entryPath }
+    }
+
+    private func pumpThumbnails() {
+        while thumbRequests.count < Self.maxThumbsInFlight, let next = thumbQueue.popLast() {
+            let id = UUID().uuidString
+            thumbRequests[id] = next
+            link.sendMessage(MsgType.fsThumb, FsThumb(requestId: id, path: next, maxPx: Self.thumbPx))
+        }
     }
 
     func viewMode(for folder: String) -> FilesViewMode {
@@ -266,6 +288,8 @@ final class FileSession {
         }
         deleteWaiters.removeAll()
         thumbRequests.removeAll()
+        thumbQueue.removeAll()
+        pagesSoFar.removeAll()
         allFilesAccess = nil
         loading = false
     }
@@ -273,8 +297,11 @@ final class FileSession {
     // MARK: - Browsing internals
 
     private func applyThumbnail(_ t: FsThumbData) {
-        guard let entryPath = thumbRequests.removeValue(forKey: t.requestId), let b64 = t.jpegBase64,
-              let bytes = Data(base64Encoded: b64), let image = NSImage(data: bytes) else { return }
+        guard let entryPath = thumbRequests.removeValue(forKey: t.requestId) else { return }
+        defer { pumpThumbnails() }
+        guard let b64 = t.jpegBase64, let bytes = Data(base64Encoded: b64), let image = NSImage(data: bytes) else {
+            return
+        }
         thumbnails[entryPath] = image
     }
 
@@ -282,21 +309,39 @@ final class FileSession {
         path = newPath
         entries = []
         thumbnails = [:]
+        thumbQueue = []
         canGoBack = !backStack.isEmpty
         canGoForward = !forwardStack.isEmpty
         refresh()
     }
 
     private func applyListing(_ l: FsListing) {
-        if let waiter = listWaiters.removeValue(forKey: l.requestId) {
-            waiter.resume(returning: l.error == nil ? l.entries ?? [] : nil)
+        let done = l.done ?? true
+        if listWaiters[l.requestId] != nil {
+            if l.error != nil {
+                listWaiters.removeValue(forKey: l.requestId)?.resume(returning: nil)
+                pagesSoFar[l.requestId] = nil
+                return
+            }
+            pagesSoFar[l.requestId, default: []] += l.entries ?? []
+            if done {
+                let all = pagesSoFar.removeValue(forKey: l.requestId)
+                listWaiters.removeValue(forKey: l.requestId)?.resume(returning: all)
+            }
             return
         }
         guard l.requestId == listRequest else { return }
-        listRequest = nil
-        loading = false
+        // The first page replaces what was shown; later pages append.
+        if firstPagePending {
+            entries = []
+            firstPagePending = false
+        }
+        entries += l.entries ?? []
         error = l.error
-        entries = l.entries ?? []
+        if done || l.error != nil {
+            listRequest = nil
+            loading = false
+        }
     }
 
     private func listing(_ remote: String) async -> [FsEntry]? {
@@ -448,6 +493,7 @@ final class FileSession {
         update(current.id) { $0.state = .done }
         jobs[current.id] = nil
         active = nil
+        if let item = transfers.first(where: { $0.id == current.id }) { onTransferFinished?(item, current.localURL) }
         startNext()
     }
 

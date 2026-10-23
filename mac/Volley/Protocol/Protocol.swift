@@ -97,7 +97,14 @@ struct FsEntry: Codable, Equatable, Hashable {
     let modified: Int64
     let mime: String?
 }
-struct FsListing: Codable { let requestId: String; let path: String; let entries: [FsEntry]?; let error: String? }
+struct FsListing: Codable {
+    let requestId: String
+    let path: String
+    let entries: [FsEntry]?
+    let error: String?
+    /// Large folders arrive in pages; nil (older phones) means a single, complete page.
+    var done: Bool?
+}
 struct FsThumb: Codable { let requestId: String; let path: String; let maxPx: Int }
 struct FsThumbData: Codable { let requestId: String; let jpegBase64: String?; let error: String? }
 struct FsDownload: Codable { let transferId: String; let path: String }
