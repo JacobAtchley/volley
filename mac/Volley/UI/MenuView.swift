@@ -1,13 +1,5 @@
 import SwiftUI
 
-extension Color {
-    static let coral = Color(red: 1.0, green: 0.62, blue: 0.56)      // #FF9E8F
-    static let blush = Color(red: 1.0, green: 0.89, blue: 0.86)      // #FFE3DB
-    static let cocoa = Color(red: 0.165, green: 0.122, blue: 0.114)  // #2A1F1D
-    static let shell = Color(red: 1.0, green: 0.965, blue: 0.949)    // #FFF6F2
-    static let muted = Color(red: 0.42, green: 0.34, blue: 0.325)    // #6B5753
-}
-
 struct MenuView: View {
     let session: PhoneSession
 
@@ -22,7 +14,7 @@ struct MenuView: View {
         .padding(16)
         .frame(width: 360)
         .background(Color.shell)
-        .foregroundStyle(Color.cocoa)
+        .foregroundStyle(Color.ink)
     }
 
     // MARK: Sections
@@ -42,7 +34,7 @@ struct MenuView: View {
             Label("Open Volley", systemImage: "bubble.left.and.bubble.right")
                 .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.borderedProminent).tint(.coral).foregroundStyle(Color.cocoa)
+        .buttonStyle(.borderedProminent).tint(.coral).foregroundStyle(Color.onCoral)
     }
 
     @ViewBuilder
@@ -59,7 +51,7 @@ struct MenuView: View {
                 Text("Install Volley on your Android phone, then pair it with this Mac.")
                     .font(.callout).foregroundStyle(Color.muted)
                 Button("Pair a phone") { session.startPairing() }
-                    .buttonStyle(.borderedProminent).tint(.coral).foregroundStyle(Color.cocoa)
+                    .buttonStyle(.borderedProminent).tint(.coral).foregroundStyle(Color.onCoral)
             }
         }
     }
@@ -76,7 +68,7 @@ struct MenuView: View {
                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(Color.muted)
             }
             .padding(10)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 10))
+            .background(Color.card, in: RoundedRectangle(cornerRadius: 10))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -115,7 +107,7 @@ struct MenuView: View {
         VStack(alignment: .leading, spacing: 8, content: content)
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
+            .background(Color.card, in: RoundedRectangle(cornerRadius: 14))
     }
 
     private var statusText: String {
@@ -143,11 +135,11 @@ struct VolleyMark: View {
             var arc = Path()
             arc.move(to: CGPoint(x: 13 * s, y: 45 * s))
             arc.addQuadCurve(to: CGPoint(x: 51 * s, y: 45 * s), control: CGPoint(x: 32 * s, y: 4 * s))
-            ctx.stroke(arc, with: .color(.cocoa), style: StrokeStyle(lineWidth: 5 * s, lineCap: .round))
+            ctx.stroke(arc, with: .color(.onCoral), style: StrokeStyle(lineWidth: 5 * s, lineCap: .round))
             for x in [13.0, 51.0] {
                 let r = 5 * s
                 let dot = CGRect(x: x * s - r, y: 45 * s - r, width: 2 * r, height: 2 * r)
-                ctx.fill(Path(ellipseIn: dot), with: .color(.cocoa))
+                ctx.fill(Path(ellipseIn: dot), with: .color(.onCoral))
             }
         }
         .accessibilityHidden(true)

@@ -213,7 +213,7 @@ private struct ChatView: View {
                 .lineLimit(1...6)
                 .focused($composing)
                 .padding(.horizontal, 12).padding(.vertical, 8)
-                .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
+                .background(Color.card, in: RoundedRectangle(cornerRadius: 16))
                 .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.muted.opacity(0.25)))
                 .onKeyPress(.return, phases: .down) { press in
                     // Return sends; Shift-Return falls through and inserts a newline.
@@ -260,7 +260,7 @@ private struct Bubble: View {
                     .textSelection(.enabled)
                     .padding(.horizontal, 12).padding(.vertical, 7)
                     .background(item.outgoing ? Color.coral : Color.blush, in: RoundedRectangle(cornerRadius: 16))
-                    .foregroundStyle(Color.cocoa)
+                    .foregroundStyle(item.outgoing ? Color.onCoral : Color.ink)
                     .opacity(item.state == .sending ? 0.6 : 1)
                 HStack(spacing: 4) {
                     if item.state == .failed {
@@ -300,13 +300,13 @@ private struct PairPrompt: View {
             } else {
                 Text("Install Volley on your Android phone, then pair it with this Mac.").foregroundStyle(Color.muted)
                 Button("Pair a phone") { session.startPairing() }
-                    .buttonStyle(.borderedProminent).tint(.coral).foregroundStyle(Color.cocoa)
+                    .buttonStyle(.borderedProminent).tint(.coral).foregroundStyle(Color.onCoral)
             }
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.shell)
-        .foregroundStyle(Color.cocoa)
+        .foregroundStyle(Color.ink)
     }
 }
 
