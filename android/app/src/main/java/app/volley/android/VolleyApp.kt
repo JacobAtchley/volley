@@ -30,6 +30,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy
 import java.util.concurrent.TimeUnit
 
 class VolleyApp : Application() {
@@ -84,6 +87,15 @@ class AppGraph(context: Context) {
         hasAccess = androidFiles::hasAccess,
         onTransferActive = androidFiles::setTransferActive,
         scan = androidFiles::scan,
+        // One worker, newest 64 requests: scrolling a huge photo folder can't pile up stale thumbnails.
+        background = ThreadPoolExecutor(
+            1,
+            1,
+            0,
+            TimeUnit.SECONDS,
+            LinkedBlockingQueue(64),
+            DiscardOldestPolicy(),
+        )::execute,
     )
     private var lastFileAccess: Boolean? = null
 

@@ -400,8 +400,10 @@ final class FileSession {
 
     private func beginUpload(_ r: FsUploadReady) {
         guard var current = active, current.id.uuidString == r.transferId,
-              case let .upload(local, _) = jobs[current.id],
-              let handle = try? FileHandle(forReadingFrom: local) else { return }
+              case let .upload(local, _) = jobs[current.id] else { return }
+        guard let handle = try? FileHandle(forReadingFrom: local) else {
+            return fail("Couldn't read \(local.lastPathComponent)")
+        }
         let link = self.link
         current.sender = ChunkSender(id: current.id, input: handle, send: { link.sendBinary($0) })
         active = current
@@ -449,6 +451,8 @@ final class FileSession {
 
     private func fail(_ message: String) {
         guard let current = active else { return }
+        // Tell the phone so it stops sending and releases the file (harmless if it already knows).
+        link.sendMessage(MsgType.fsCancel, FsCancel(transferId: current.id.uuidString))
         abandonActive(deletePartial: true)
         update(current.id) { $0.state = .failed(message) }
         finishJob(current.id, url: nil)
@@ -463,6 +467,7 @@ final class FileSession {
     private func abandonActive(deletePartial: Bool) {
         guard let current = active else { return }
         current.receiver?.abandon()
+        current.sender?.close()
         if deletePartial, current.receiver != nil, let url = current.localURL {
             try? FileManager.default.removeItem(at: url)
         }

@@ -241,4 +241,26 @@ final class FileSessionTests: XCTestCase {
         files.disconnected()
         XCTAssertEqual(results, [nil, nil])
     }
+
+    func testUnreadableUploadFailsAndContinues() throws {
+        let gone = dir.appendingPathComponent("gone.txt")
+        let next = dir.appendingPathComponent("next.txt")
+        try Data([1]).write(to: gone)
+        try Data([2]).write(to: next)
+        files.upload([gone, next], into: "Download")
+        let req = try XCTUnwrap(link.bodies(MsgType.fsUpload, as: FsUpload.self).last)
+        try FileManager.default.removeItem(at: gone)
+        deliver(MsgType.fsUploadReady, FsUploadReady(transferId: req.transferId, finalName: "gone.txt"))
+        guard case .failed = files.transfers.first?.state else { return XCTFail("expected failure") }
+        XCTAssertEqual(link.bodies(MsgType.fsCancel, as: FsCancel.self).map(\.transferId), [req.transferId])
+        XCTAssertEqual(files.transfers.last?.state, .running)
+    }
+
+    func testMacSideDownloadFailureTellsPhone() throws {
+        files.download(["a.bin"], to: dir.appendingPathComponent("does/not/exist"))
+        let req = try XCTUnwrap(link.bodies(MsgType.fsDownload, as: FsDownload.self).last)
+        deliver(MsgType.fsBegin, FsBegin(transferId: req.transferId, size: 1, name: "a.bin"))
+        guard case .failed = files.transfers.first?.state else { return XCTFail("expected failure") }
+        XCTAssertEqual(link.bodies(MsgType.fsCancel, as: FsCancel.self).map(\.transferId), [req.transferId])
+    }
 }

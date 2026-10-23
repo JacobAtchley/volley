@@ -60,4 +60,16 @@ class StoragePathsTest {
         assertEquals(".nomedia (1)", StoragePaths.uniqueName(setOf(".nomedia"), ".nomedia"))
         assertEquals("a.tar (1).gz", StoragePaths.uniqueName(setOf("a.tar.gz"), "a.tar.gz"))
     }
+
+    @Test
+    fun androidPrivateDirsHiddenRegardlessOfCase() {
+        assertTrue(paths.isHiddenSystemDir("android/DATA/com.app"))
+        assertNull(paths.resolve("ANDROID/obb"))
+    }
+
+    @Test
+    fun uniqueNameIgnoresCase() {
+        // Shared storage is case-insensitive: "photo.jpg" would open the existing "Photo.jpg".
+        assertEquals("photo (1).jpg", StoragePaths.uniqueName(setOf("Photo.jpg"), "photo.jpg"))
+    }
 }

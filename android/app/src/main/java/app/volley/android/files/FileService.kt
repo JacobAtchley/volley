@@ -50,7 +50,7 @@ class DiskFileService(private val paths: StoragePaths, private val thumbnails: (
     override fun delete(paths: List<String>): List<FsDeleteFailure> = paths.mapNotNull { path ->
         val file = this.paths.resolve(path)
         when {
-            file == null || path.isEmpty() -> FsDeleteFailure(path, "Not allowed")
+            file == null || this.paths.isProtected(file) -> FsDeleteFailure(path, "Not allowed")
             !file.exists() -> FsDeleteFailure(path, "Not found")
             !file.deleteRecursively() -> FsDeleteFailure(path, "Couldn't delete")
             else -> null

@@ -83,4 +83,14 @@ class FileServiceTest {
         service.discard("partial.bin")
         assertFalse(File(root, "partial.bin").exists())
     }
+
+    @Test
+    fun deleteRefusesRootAndAndroidFolder() {
+        touch("Download/keep.txt")
+        File(root, "Android/media").mkdirs()
+        val failed = service.delete(listOf(".", "Download/..", "", "Android", "android"))
+        assertEquals(5, failed.size)
+        assertTrue(File(root, "Download/keep.txt").exists())
+        assertTrue(File(root, "Android/media").exists())
+    }
 }

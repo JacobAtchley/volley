@@ -36,6 +36,7 @@ class FileHandlers(
     private val onTransferActive: (Boolean) -> Unit = {},
     private val scan: (String) -> Unit = {},
     private val chunk: Int = ChunkFrame.CHUNK,
+    private val background: (Runnable) -> Unit = { it.run() },
 ) {
     private val registry = TransferRegistry()
     private val endSent = ConcurrentHashMap.newKeySet<UUID>()
@@ -51,7 +52,17 @@ class FileHandlers(
 
     fun statusFrame(): String = Codec.encode(MsgType.FS_STATUS, FsStatus(hasAccess()))
 
+    /** One bad request (malformed id, disk full…) must not take down the connection, texts included. */
     fun handle(env: Envelope) {
+        try {
+            dispatch(env)
+        } catch (e: Exception) {
+            val id = runCatching { env.body["transferId"]?.toString()?.trim('"') }.getOrNull()
+            if (id != null) failTransfer(id, e.message ?: "Phone error")
+        }
+    }
+
+    private fun dispatch(env: Envelope) {
         when (env.type) {
             MsgType.FS_LIST -> env.bodyAs<FsList>()?.let(::list)
             MsgType.FS_THUMB -> env.bodyAs<FsThumb>()?.let(::thumb)
@@ -60,18 +71,30 @@ class FileHandlers(
             MsgType.FS_UPLOAD -> env.bodyAs<FsUpload>()?.let(::upload)
             MsgType.FILE_ACK -> env.bodyAs<FileAck>()?.let(::ack)
             MsgType.FS_END -> env.bodyAs<FsEnd>()?.let(::end)
-            MsgType.FS_DONE -> env.bodyAs<FsDone>()?.let { finished(UUID.fromString(it.transferId)) }
-            MsgType.FS_CANCEL -> env.bodyAs<FsCancel>()?.let { cancel(UUID.fromString(it.transferId)) }
+            MsgType.FS_DONE -> env.bodyAs<FsDone>()?.let { done -> uuid(done.transferId)?.let(::finished) }
+            MsgType.FS_CANCEL -> env.bodyAs<FsCancel>()?.let { c -> uuid(c.transferId)?.let(::cancel) }
         }
     }
 
     fun onBinary(bytes: ByteArray) {
         val (id, payload) = ChunkFrame.decode(bytes) ?: return
-        registry.receiver(id)?.onChunk(payload)
+        val receiver = registry.receiver(id) ?: return
+        try {
+            receiver.onChunk(payload)
+        } catch (e: Exception) {
+            failTransfer(id.toString(), e.message ?: "Couldn't write")
+        }
+    }
+
+    /** Ends a transfer after a phone-side error and tells the Mac why. */
+    private fun failTransfer(transferId: String, message: String) {
+        send(Codec.encode(MsgType.FS_DONE, FsDone(transferId, ok = false, error = message)))
+        uuid(transferId)?.let(::cancel)
     }
 
     /** The Mac went away: abandon every transfer and delete partial uploads. */
     fun onDisconnect() {
+        activeIds.forEach(::closeStreams)
         uploads.values.forEach(files::discard)
         uploads.clear()
         registry.clear()
@@ -91,8 +114,9 @@ class FileHandlers(
         send(Codec.encode(MsgType.FS_LISTING, listing))
     }
 
-    private fun thumb(req: FsThumb) {
-        val data = files.thumbnail(req.path, req.maxPx).fold(
+    /** Thumbnails are slow; make them off the receive thread so texts and transfers keep flowing. */
+    private fun thumb(req: FsThumb) = background {
+        val data = files.thumbnail(req.path, req.maxPx.coerceIn(1, MAX_THUMB_PX)).fold(
             { FsThumbData(req.requestId, Base64.getEncoder().encodeToString(it)) },
             { FsThumbData(req.requestId, error = it.message) },
         )
@@ -106,7 +130,7 @@ class FileHandlers(
     }
 
     private fun download(req: FsDownload) {
-        val id = UUID.fromString(req.transferId)
+        val id = uuid(req.transferId) ?: return
         val opened = if (hasAccess()) files.openRead(req.path) else Result.failure(noAccess())
         val (input, size) = opened.getOrElse {
             send(Codec.encode(MsgType.FS_DONE, FsDone(req.transferId, ok = false, error = it.message)))
@@ -120,7 +144,7 @@ class FileHandlers(
     }
 
     private fun upload(req: FsUpload) {
-        val id = UUID.fromString(req.transferId)
+        val id = uuid(req.transferId) ?: return
         val created = if (hasAccess()) files.createForUpload(req.dir, req.name) else Result.failure(noAccess())
         val (finalName, output) = created.getOrElse {
             send(Codec.encode(MsgType.FS_DONE, FsDone(req.transferId, ok = false, error = it.message)))
@@ -137,7 +161,7 @@ class FileHandlers(
     }
 
     private fun ack(req: FileAck) {
-        val sender = registry.sender(UUID.fromString(req.transferId)) ?: return
+        val sender = uuid(req.transferId)?.let(registry::sender) ?: return
         sender.onAck(req.received)
         pump(sender)
     }
@@ -150,7 +174,7 @@ class FileHandlers(
 
     /** End of an upload: verify, then keep or discard. */
     private fun end(req: FsEnd) {
-        val id = UUID.fromString(req.transferId)
+        val id = uuid(req.transferId) ?: return
         val receiver = registry.receiver(id) ?: return
         val path = uploads.remove(id)
         val ok = receiver.finish(req.sha256)
@@ -171,10 +195,22 @@ class FileHandlers(
     }
 
     private fun finished(id: UUID) {
+        closeStreams(id)
         registry.remove(id)
         endSent.remove(id)
         if (activeIds.remove(id) && activeIds.isEmpty()) onTransferActive(false)
     }
 
+    private fun closeStreams(id: UUID) {
+        registry.sender(id)?.close()
+        registry.receiver(id)?.close()
+    }
+
+    private fun uuid(value: String): UUID? = runCatching { UUID.fromString(value) }.getOrNull()
+
     private fun noAccess() = IllegalStateException("Volley needs All files access on the phone")
+
+    private companion object {
+        const val MAX_THUMB_PX = 512
+    }
 }

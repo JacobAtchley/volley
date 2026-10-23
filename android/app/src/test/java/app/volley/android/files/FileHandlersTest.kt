@@ -35,9 +35,14 @@ class FileHandlersTest {
     private var access = true
     private val scanned = mutableListOf<String>()
     private val active = mutableListOf<Boolean>()
+    private val thumbSizes = mutableListOf<Int>()
+    private val queuedWork = mutableListOf<Runnable>()
     private val handlers by lazy {
         FileHandlers(
-            files = DiskFileService(StoragePaths(root)) { _, _ -> null },
+            files = DiskFileService(StoragePaths(root)) { _, px ->
+                thumbSizes += px
+                byteArrayOf(1)
+            },
             send = {
                 sent += Codec.decode(it)!!
                 true
@@ -50,6 +55,7 @@ class FileHandlersTest {
             onTransferActive = { active += it },
             scan = { scanned += it },
             chunk = 4,
+            background = { queuedWork += it },
         )
     }
 
@@ -153,5 +159,52 @@ class FileHandlersTest {
         handlers.onDisconnect()
         assertFalse(File(root, "Download/d.txt").exists())
         assertEquals(listOf(true, false), active)
+    }
+
+    @Test
+    fun malformedTransferIdDoesNotThrow() {
+        deliver(MsgType.FS_DOWNLOAD, FsDownload("not-a-uuid", "x"))
+        deliver(MsgType.FILE_ACK, FileAck("nope", 1))
+        assertTrue(sent.none { it.type == MsgType.FS_BEGIN })
+    }
+
+    @Test
+    fun zeroByteUploadCompletes() {
+        val (name, done) = upload("empty.txt", ByteArray(0))
+        assertTrue(done.ok)
+        assertTrue(File(root, "Download/$name").exists())
+    }
+
+    @Test
+    fun cancelClosesDownloadStream() {
+        var closed = false
+        val disk = DiskFileService(StoragePaths(root)) { _, _ -> null }
+        val tracking = object : FileService by disk {
+            override fun openRead(path: String) = disk.openRead(path).map { (input, size) ->
+                object : java.io.FilterInputStream(input) {
+                    override fun close() {
+                        closed = true
+                        super.close()
+                    }
+                } to size
+            }
+        }
+        val h = FileHandlers(tracking, send = { true }, sendBinary = { true }, hasAccess = { true }, chunk = 4)
+        File(root, "big.bin").writeBytes(ByteArray(100))
+        val id = UUID.randomUUID().toString()
+        h.handle(Codec.decode(Codec.encode(MsgType.FS_DOWNLOAD, FsDownload(id, "big.bin")))!!)
+        assertFalse(closed)
+        h.handle(Codec.decode(Codec.encode(MsgType.FS_CANCEL, FsCancel(id)))!!)
+        assertTrue(closed)
+    }
+
+    @Test
+    fun thumbnailsRunOffTheReceiveThreadWithCappedSize() {
+        File(root, "a.jpg").writeBytes(ByteArray(1))
+        deliver(MsgType.FS_THUMB, app.volley.android.protocol.FsThumb("t1", "a.jpg", maxPx = 5_000))
+        assertTrue("nothing sent until the background work runs", sent.none { it.type == MsgType.FS_THUMB_DATA })
+        queuedWork.forEach(Runnable::run)
+        assertEquals(listOf(512), thumbSizes)
+        assertEquals(1, sent.count { it.type == MsgType.FS_THUMB_DATA })
     }
 }

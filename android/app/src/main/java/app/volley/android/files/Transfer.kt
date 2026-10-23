@@ -68,6 +68,10 @@ class ChunkSender(
     val done: Boolean
         @Synchronized get() = eof && pending == null && acked >= sent
 
+    /** Releases the file (cancel, disconnect, or done). */
+    @Synchronized
+    fun close() = runCatching { input.close() }
+
     /** Hex SHA-256 of everything read; valid once [pump] has returned true. */
     val sha256Hex: String
         @Synchronized get() = hex ?: digest.digest().toHex().also { hex = it }
@@ -103,6 +107,10 @@ class ChunkReceiver(val id: UUID, private val output: OutputStream, private val 
         received++
         ack(received)
     }
+
+    /** Releases the file without verifying (cancel, disconnect). */
+    @Synchronized
+    fun close() = runCatching { output.close() }
 
     /** Closes the output; true when the content matches [expectedSha256]. */
     @Synchronized

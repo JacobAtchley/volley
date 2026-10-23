@@ -95,4 +95,12 @@ final class TransferTests: XCTestCase {
         let (out, _) = try sink()
         XCTAssertTrue(ChunkReceiver(id: id, output: out) { _ in }.finish(expectedSha256: sha([])))
     }
+
+    func testReceiverWriteFailureFailsVerification() throws {
+        let (out, _) = try sink()
+        try out.close() // writes now fail, as on a full disk
+        let receiver = ChunkReceiver(id: id, output: out) { _ in }
+        receiver.onChunk(Data([1, 2]))
+        XCTAssertFalse(receiver.finish(expectedSha256: sha([1, 2])))
+    }
 }

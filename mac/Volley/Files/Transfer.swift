@@ -63,6 +63,9 @@ final class ChunkSender {
 
     var done: Bool { eof && pending == nil && acked >= sent }
 
+    /// Releases the file (cancel or disconnect).
+    func close() { try? input.close() }
+
     /// Hex SHA-256 of everything read; valid once `pump()` has returned true.
     var sha256Hex: String {
         if let hex { return hex }
@@ -91,6 +94,7 @@ final class ChunkReceiver {
     private let ack: (Int) -> Void
     private var hasher = SHA256()
     private var received = 0
+    private var writeFailed = false
 
     init(id: UUID, output: FileHandle, ack: @escaping (Int) -> Void) {
         self.id = id
@@ -99,7 +103,11 @@ final class ChunkReceiver {
     }
 
     func onChunk(_ data: Data) {
-        try? output.write(contentsOf: data)
+        do {
+            try output.write(contentsOf: data)
+        } catch {
+            writeFailed = true // e.g. disk full: the file on disk won't match, whatever the checksum says
+        }
         hasher.update(data: data)
         received += 1
         ack(received)
@@ -109,7 +117,7 @@ final class ChunkReceiver {
     func finish(expectedSha256: String) -> Bool {
         try? output.close()
         let actual = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        return actual.caseInsensitiveCompare(expectedSha256) == .orderedSame
+        return !writeFailed && actual.caseInsensitiveCompare(expectedSha256) == .orderedSame
     }
 
     /// Closes the file without verifying (cancel / disconnect).
