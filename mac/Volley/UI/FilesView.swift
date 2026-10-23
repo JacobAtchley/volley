@@ -383,7 +383,7 @@ private struct IconTile: View {
             }
             .frame(width: 92, height: 72)
             .clipShape(RoundedRectangle(cornerRadius: 8))
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 8))
+            .background(Color.card, in: RoundedRectangle(cornerRadius: 8))
             Text(entry.name).font(.caption).lineLimit(2).multilineTextAlignment(.center)
         }
         .padding(6)
