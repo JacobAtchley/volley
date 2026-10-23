@@ -133,4 +133,31 @@ final class NotificationSessionTests: XCTestCase {
         session.setExcluded(slack, false)
         XCTAssertEqual(session.notificationHistory.count, 1)
     }
+
+    func testDismissAllSendsEachUnclearedKeyOnceAndMarksCleared() {
+        connect()
+        deliver(MsgType.notificationPosted, posted("a", text: "one"))
+        deliver(MsgType.notificationPosted, posted("a", text: "two")) // same key, second history row
+        deliver(MsgType.notificationPosted, posted("b"))
+        deliver(MsgType.notificationPosted, posted("c"))
+        deliver(MsgType.notificationRemoved, NotificationKey(key: "c")) // already gone from the phone
+        XCTAssertEqual(session.undismissedCount, 2)
+
+        session.dismissAll()
+
+        let keys = transport.sentBodies(MsgType.notificationDismiss, as: NotificationKey.self).map(\.key)
+        XCTAssertEqual(keys.sorted(), ["a", "b"])
+        XCTAssertTrue(session.notificationHistory.allSatisfy(\.cleared))
+        XCTAssertEqual(session.notificationHistory.count, 4, "history is kept")
+        XCTAssertEqual(session.undismissedCount, 0)
+    }
+
+    func testDismissAllOfflineDoesNothing() {
+        connect()
+        deliver(MsgType.notificationPosted, posted("a"))
+        transport.onEvent?(.closed(conn))
+        session.dismissAll()
+        XCTAssertTrue(transport.sentBodies(MsgType.notificationDismiss, as: NotificationKey.self).isEmpty)
+        XCTAssertEqual(session.notificationHistory.map(\.cleared), [false])
+    }
 }

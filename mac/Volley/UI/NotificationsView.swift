@@ -6,6 +6,7 @@ struct NotificationList: View {
     @Binding var selection: StoredNotification.ID?
     @State private var query = ""
     @State private var showingExcluded = false
+    @State private var confirmingDismissAll = false
 
     var body: some View {
         let results = FuzzySearch.search(query, in: session.notificationHistory)
@@ -30,6 +31,13 @@ struct NotificationList: View {
         .searchable(text: $query, placement: .toolbar, prompt: "Search notifications")
         .toolbar {
             Button {
+                confirmingDismissAll = true
+            } label: {
+                Label("Dismiss All", systemImage: "bell.slash")
+            }
+            .disabled(!session.isConnected || session.undismissedCount == 0)
+            .help(session.isConnected ? "Dismiss every notification still showing on your phone" : "Phone offline")
+            Button {
                 showingExcluded = true
             } label: {
                 Label("Mirrored Apps…", systemImage: "line.3.horizontal.decrease.circle")
@@ -37,6 +45,17 @@ struct NotificationList: View {
             .help("Choose apps whose notifications aren't mirrored")
         }
         .sheet(isPresented: $showingExcluded) { ExcludedAppsSheet(session: session) }
+        .confirmationDialog(dismissAllTitle, isPresented: $confirmingDismissAll, titleVisibility: .visible) {
+            Button("Dismiss All", role: .destructive) { session.dismissAll() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("They'll be cleared from your phone and from Notification Center on this Mac. History is kept.")
+        }
+    }
+
+    private var dismissAllTitle: String {
+        let n = session.undismissedCount
+        return "Dismiss \(n) notification\(n == 1 ? "" : "s") on your phone?"
     }
 
     private func rows(_ items: [StoredNotification]) -> some View {
