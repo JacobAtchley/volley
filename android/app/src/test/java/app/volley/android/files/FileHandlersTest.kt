@@ -207,4 +207,24 @@ class FileHandlersTest {
         assertEquals(listOf(512), thumbSizes)
         assertEquals(1, sent.count { it.type == MsgType.FS_THUMB_DATA })
     }
+
+    @Test
+    fun listPagesOf500() {
+        val dir = File(root, "DCIM/Camera").apply { mkdirs() }
+        repeat(1_201) { File(dir, "IMG_%04d.jpg".format(it)).writeBytes(ByteArray(1)) }
+        deliver(MsgType.FS_LIST, FsList("r1", "DCIM/Camera"))
+        val pages = sentBodies<FsListing>(MsgType.FS_LISTING)
+        assertEquals(listOf(500, 500, 201), pages.map { it.entries.size })
+        assertEquals(listOf(false, false, true), pages.map { it.done })
+        assertEquals(1_201, pages.flatMap { it.entries }.map { it.name }.toSet().size)
+    }
+
+    @Test
+    fun emptyFolderSendsOneDonePage() {
+        File(root, "Empty").mkdir()
+        deliver(MsgType.FS_LIST, FsList("r1", "Empty"))
+        val page = sentBodies<FsListing>(MsgType.FS_LISTING).single()
+        assertTrue(page.done)
+        assertTrue(page.entries.isEmpty())
+    }
 }

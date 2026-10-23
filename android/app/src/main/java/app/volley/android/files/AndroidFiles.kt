@@ -1,6 +1,7 @@
 package app.volley.android.files
 
 import android.Manifest
+import android.content.ContentUris
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -10,7 +11,9 @@ import android.media.ThumbnailUtils
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Environment
+import android.provider.MediaStore
 import android.util.Size
+import androidx.annotation.RequiresApi
 import java.io.ByteArrayOutputStream
 import java.io.File
 
@@ -42,12 +45,59 @@ class AndroidFiles(private val context: Context) {
                 }
             }
         }.getOrNull() ?: return null
-        return ByteArrayOutputStream().use { out ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
-            bitmap.recycle()
-            out.toByteArray()
-        }
+        return bitmap.toJpeg()
     }
+
+    private fun Bitmap.toJpeg(): ByteArray = ByteArrayOutputStream().use { out ->
+        compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+        recycle()
+        out.toByteArray()
+    }
+
+    /** Folder → (file name → media id), so one MediaStore query serves a whole folder of thumbnails. */
+    private val mediaIds = object : LinkedHashMap<String, Map<String, Pair<Long, Int>>>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Map<String, Pair<Long, Int>>>) =
+            size > MEDIA_FOLDERS_CACHED
+    }
+
+    /** Android's cached Gallery thumbnail (fast), or null when the file isn't in the media library. */
+    fun mediaThumbnail(file: File, maxPx: Int): ByteArray? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        val folder = file.parentFile?.relativeTo(root)?.path?.let { if (it.isEmpty()) "" else "$it/" } ?: return null
+        val ids = synchronized(mediaIds) { mediaIds.getOrPut(folder) { queryMediaIds(folder) } }
+        val (id, type) = ids[file.name] ?: return null
+        val base = if (type == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO) {
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        } else {
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        }
+        val bitmap = runCatching {
+            context.contentResolver.loadThumbnail(ContentUris.withAppendedId(base, id), Size(maxPx, maxPx), null)
+        }.getOrNull() ?: return null
+        return bitmap.toJpeg()
+    }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun queryMediaIds(folder: String): Map<String, Pair<Long, Int>> = runCatching {
+        val cols = arrayOf(
+            MediaStore.Files.FileColumns._ID,
+            MediaStore.Files.FileColumns.DISPLAY_NAME,
+            MediaStore.Files.FileColumns.MEDIA_TYPE,
+        )
+        context.contentResolver.query(
+            MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL),
+            cols,
+            "${MediaStore.Files.FileColumns.RELATIVE_PATH} = ? AND ${MediaStore.Files.FileColumns.MEDIA_TYPE} IN (?, ?)",
+            arrayOf(
+                folder,
+                MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE.toString(),
+                MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO.toString(),
+            ),
+            null,
+        )?.use { c ->
+            buildMap { while (c.moveToNext()) put(c.getString(1), c.getLong(0) to c.getInt(2)) }
+        }.orEmpty()
+    }.getOrDefault(emptyMap())
 
     /** Tells the media store about added or deleted files so Gallery and other apps see them. */
     fun scan(relative: String) {
@@ -85,5 +135,6 @@ class AndroidFiles(private val context: Context) {
 
     private companion object {
         const val JPEG_QUALITY = 70
+        const val MEDIA_FOLDERS_CACHED = 8
     }
 }

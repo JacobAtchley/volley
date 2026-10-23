@@ -121,6 +121,8 @@ data class FsListing(
     val path: String,
     val entries: List<FsEntry> = emptyList(),
     val error: String? = null,
+    /** Large folders arrive in pages; the last page has `done = true`. */
+    val done: Boolean = true,
 )
 
 @Serializable data class FsThumb(val requestId: String, val path: String, val maxPx: Int = 256)

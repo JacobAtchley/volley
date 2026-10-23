@@ -107,11 +107,27 @@ class FileHandlers(
 
     private fun list(req: FsList) {
         val result = if (hasAccess()) files.list(req.path, req.showHidden) else Result.failure(noAccess())
-        val listing = result.fold(
-            { FsListing(req.requestId, req.path, it) },
-            { FsListing(req.requestId, req.path, error = it.message ?: "Couldn't list") },
-        )
-        send(Codec.encode(MsgType.FS_LISTING, listing))
+        val entries = result.getOrElse {
+            send(
+                Codec.encode(
+                    MsgType.FS_LISTING,
+                    FsListing(
+                        req.requestId,
+                        req.path,
+                        error =
+                        it.message ?: "Couldn't list",
+                    ),
+                ),
+            )
+            return
+        }
+        // Pages, so the Mac can show the first screen of a huge folder straight away.
+        val pages = entries.chunked(LIST_PAGE).ifEmpty { listOf(emptyList()) }
+        pages.forEachIndexed { i, page ->
+            send(
+                Codec.encode(MsgType.FS_LISTING, FsListing(req.requestId, req.path, page, done = i == pages.lastIndex)),
+            )
+        }
     }
 
     /** Thumbnails are slow; make them off the receive thread so texts and transfers keep flowing. */
@@ -212,5 +228,6 @@ class FileHandlers(
 
     private companion object {
         const val MAX_THUMB_PX = 512
+        const val LIST_PAGE = 500
     }
 }

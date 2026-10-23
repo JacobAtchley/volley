@@ -93,4 +93,29 @@ class FileServiceTest {
         assertTrue(File(root, "Download/keep.txt").exists())
         assertTrue(File(root, "Android/media").exists())
     }
+
+    @Test
+    fun listOmitsSymlinks() {
+        touch("real.txt")
+        java.nio.file.Files.createSymbolicLink(File(root, "link.txt").toPath(), File(root, "real.txt").toPath())
+        assertEquals(listOf("real.txt"), service.list("", showHidden = false).getOrThrow().map { it.name })
+    }
+
+    @Test
+    fun thumbnailPrefersMediaStore() {
+        touch("a.jpg")
+        val decoded = mutableListOf<String>()
+        val media = DiskFileService(
+            StoragePaths(root),
+            thumbnails = { f, _ ->
+                decoded += f.name
+                byteArrayOf(2)
+            },
+            mediaThumbnail = { f, _ -> if (f.name == "a.jpg") byteArrayOf(1) else null },
+        )
+        assertEquals(1.toByte(), media.thumbnail("a.jpg", 64).getOrThrow().single())
+        assertTrue(decoded.isEmpty())
+        touch("b.png")
+        assertEquals(2.toByte(), media.thumbnail("b.png", 64).getOrThrow().single())
+    }
 }

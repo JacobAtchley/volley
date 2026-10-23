@@ -81,7 +81,11 @@ class AppGraph(context: Context) {
 
     private val androidFiles = AndroidFiles(context)
     private val fileHandlers = FileHandlers(
-        files = DiskFileService(StoragePaths(androidFiles.root), androidFiles::thumbnail),
+        files = DiskFileService(
+            StoragePaths(androidFiles.root),
+            mediaThumbnail = androidFiles::mediaThumbnail,
+            thumbnails = androidFiles::thumbnail,
+        ),
         send = { session.send(it) },
         sendBinary = { session.sendBinary(it) },
         hasAccess = androidFiles::hasAccess,
