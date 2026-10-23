@@ -227,4 +227,12 @@ class FileHandlersTest {
         assertTrue(page.done)
         assertTrue(page.entries.isEmpty())
     }
+
+    @Test
+    fun downloadEchoesTheMacsTransferIdExactly() {
+        File(root, "v.bin").writeBytes(ByteArray(3))
+        val macId = UUID.randomUUID().toString().uppercase()
+        deliver(MsgType.FS_DOWNLOAD, FsDownload(macId, "v.bin"))
+        assertEquals(listOf(macId), sentBodies<FsEnd>(MsgType.FS_END).map { it.transferId })
+    }
 }

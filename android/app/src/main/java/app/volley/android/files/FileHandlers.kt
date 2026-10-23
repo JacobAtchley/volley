@@ -45,6 +45,9 @@ class FileHandlers(
     private val uploads = ConcurrentHashMap<UUID, String>()
     private val activeIds = ConcurrentHashMap.newKeySet<UUID>()
 
+    /** The id exactly as the Mac wrote it; Swift's uppercase form must come back unchanged. */
+    private val wireIds = ConcurrentHashMap<UUID, String>()
+
     val types = listOf(
         MsgType.FS_LIST, MsgType.FS_THUMB, MsgType.FS_DELETE, MsgType.FS_DOWNLOAD, MsgType.FS_UPLOAD,
         MsgType.FILE_ACK, MsgType.FS_END, MsgType.FS_DONE, MsgType.FS_CANCEL,
@@ -82,7 +85,7 @@ class FileHandlers(
         try {
             receiver.onChunk(payload)
         } catch (e: Exception) {
-            failTransfer(id.toString(), e.message ?: "Couldn't write")
+            failTransfer(wireIds[id] ?: id.toString(), e.message ?: "Couldn't write")
         }
     }
 
@@ -99,6 +102,7 @@ class FileHandlers(
         uploads.clear()
         registry.clear()
         endSent.clear()
+        wireIds.clear()
         if (activeIds.isNotEmpty()) {
             activeIds.clear()
             onTransferActive(false)
@@ -152,7 +156,7 @@ class FileHandlers(
             send(Codec.encode(MsgType.FS_DONE, FsDone(req.transferId, ok = false, error = it.message)))
             return
         }
-        started(id)
+        started(id, req.transferId)
         send(Codec.encode(MsgType.FS_BEGIN, FsBegin(req.transferId, size, req.path.substringAfterLast('/'))))
         val sender = ChunkSender(id, input, sendBinary, chunk = chunk)
         registry.add(sender)
@@ -166,7 +170,7 @@ class FileHandlers(
             send(Codec.encode(MsgType.FS_DONE, FsDone(req.transferId, ok = false, error = it.message)))
             return
         }
-        started(id)
+        started(id, req.transferId)
         uploads[id] = listOf(req.dir, finalName).filter { it.isNotEmpty() }.joinToString("/")
         registry.add(
             ChunkReceiver(id, output) { received ->
@@ -184,7 +188,7 @@ class FileHandlers(
 
     private fun pump(sender: ChunkSender) {
         if (sender.pump() && endSent.add(sender.id)) {
-            send(Codec.encode(MsgType.FS_END, FsEnd(sender.id.toString(), sender.sha256Hex)))
+            send(Codec.encode(MsgType.FS_END, FsEnd(wireIds[sender.id] ?: sender.id.toString(), sender.sha256Hex)))
         }
     }
 
@@ -205,13 +209,15 @@ class FileHandlers(
         finished(id)
     }
 
-    private fun started(id: UUID) {
+    private fun started(id: UUID, wireId: String) {
+        wireIds[id] = wireId
         if (activeIds.isEmpty()) onTransferActive(true)
         activeIds.add(id)
     }
 
     private fun finished(id: UUID) {
         closeStreams(id)
+        wireIds.remove(id)
         registry.remove(id)
         endSent.remove(id)
         if (activeIds.remove(id) && activeIds.isEmpty()) onTransferActive(false)

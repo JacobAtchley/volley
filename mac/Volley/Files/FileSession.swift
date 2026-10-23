@@ -274,7 +274,7 @@ final class FileSession {
             guard let d = Codec.body(FsDone.self, from: data) else { return }
             done(d)
         case MsgType.fsCancel:
-            guard let c = Codec.body(FsCancel.self, from: data), c.transferId == active?.id.uuidString else { return }
+            guard let c = Codec.body(FsCancel.self, from: data), isActive(c.transferId) else { return }
             fail("Cancelled on phone")
         default:
             break
@@ -429,7 +429,7 @@ final class FileSession {
     }
 
     private func beginDownload(_ b: FsBegin) {
-        guard var current = active, current.id.uuidString == b.transferId,
+        guard var current = active, isActive(b.transferId),
               case let .download(_, dir, _) = jobs[current.id] else { return }
         let url = finderStyleUniqueURL(in: dir, name: b.name)
         guard FileManager.default.createFile(atPath: url.path, contents: nil),
@@ -449,7 +449,7 @@ final class FileSession {
     }
 
     private func endDownload(_ e: FsEnd) {
-        guard let current = active, current.id.uuidString == e.transferId, let receiver = current.receiver,
+        guard let current = active, isActive(e.transferId), let receiver = current.receiver,
               case let .download(_, _, then) = jobs[current.id] else { return }
         let ok = receiver.finish(expectedSha256: e.sha256)
         let reply = FsDone(transferId: e.transferId, ok: ok, error: ok ? nil : "Checksum mismatch")
@@ -460,7 +460,7 @@ final class FileSession {
     }
 
     private func beginUpload(_ r: FsUploadReady) {
-        guard var current = active, current.id.uuidString == r.transferId,
+        guard var current = active, isActive(r.transferId),
               case let .upload(local, _) = jobs[current.id] else { return }
         guard let handle = try? FileHandle(forReadingFrom: local) else {
             return fail("Couldn't read \(local.lastPathComponent)")
@@ -473,7 +473,7 @@ final class FileSession {
     }
 
     private func ack(_ a: FileAck) {
-        guard let current = active, current.id.uuidString == a.transferId, let sender = current.sender else { return }
+        guard let current = active, isActive(a.transferId), let sender = current.sender else { return }
         sender.onAck(a.received)
         update(current.id) { item in
             item.transferred = min(item.size, Int64(a.received) * Int64(ChunkFrame.chunk))
@@ -491,7 +491,7 @@ final class FileSession {
     }
 
     private func done(_ d: FsDone) {
-        guard let current = active, current.id.uuidString == d.transferId else { return }
+        guard let current = active, isActive(d.transferId) else { return }
         if d.ok {
             update(current.id) { $0.transferred = $0.size }
             let dir: String? = if case let .upload(_, dir) = jobs[current.id] { dir } else { nil }
@@ -534,6 +534,12 @@ final class FileSession {
             try? FileManager.default.removeItem(at: url)
         }
         active = nil
+    }
+
+    /// Compares as UUIDs: the phone writes ids lowercase (Kotlin), the Mac uppercase (Swift).
+    private func isActive(_ transferId: String) -> Bool {
+        guard let id = UUID(uuidString: transferId) else { return false }
+        return id == active?.id
     }
 
     private func update(_ id: UUID, _ change: (inout TransferItem) -> Void) {

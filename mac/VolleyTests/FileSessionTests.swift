@@ -325,4 +325,17 @@ final class FileSessionTests: XCTestCase {
         XCTAssertEqual(sortEntries(items, by: SortChoice(key: .name, ascending: true)).map(\.name),
                        ["Zdir", "a.jpg", "b.jpg", "c.jpg"])
     }
+
+    func testPhoneMessagesMatchTransferIdsCaseInsensitively() throws {
+        // Kotlin's UUID.toString() is lowercase; Swift's uuidString is uppercase.
+        files.openInDefaultApp("DCIM/Camera/a.jpg")
+        let req = try XCTUnwrap(link.bodies(MsgType.fsDownload, as: FsDownload.self).last)
+        let lower = req.transferId.lowercased()
+        let data = Data([1, 2, 3])
+        deliver(MsgType.fsBegin, FsBegin(transferId: lower, size: 3, name: "a.jpg"))
+        files.handleBinary(ChunkFrame.encode(try XCTUnwrap(UUID(uuidString: lower)), data))
+        deliver(MsgType.fsEnd, FsEnd(transferId: lower, sha256: sha(data)))
+        XCTAssertEqual(files.transfers.first?.state, .done)
+        XCTAssertEqual(opened.map(\.lastPathComponent), ["a.jpg"])
+    }
 }
