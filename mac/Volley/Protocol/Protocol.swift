@@ -15,6 +15,9 @@ enum MsgType {
     static let smsSync = "sms.sync"
     static let smsBatch = "sms.batch"
     static let deviceStatus = "device.status"
+    static let notificationFilter = "notification.filter"
+    static let notificationSync = "notification.sync"
+    static let notificationBatch = "notification.batch"
 }
 
 struct EnvelopeHeader: Decodable {
@@ -36,7 +39,7 @@ struct PairRequest: Codable { let deviceId: String; let deviceName: String; let 
 struct PairResult: Codable { let ok: Bool; let macId: String; let macName: String; let token: String? }
 struct Hello: Codable { let deviceId: String; let deviceName: String; let token: String }
 struct HelloOk: Codable { let macId: String; let macName: String }
-struct NotificationPosted: Codable {
+struct NotificationPosted: Codable, Equatable {
     let key: String
     let pkg: String
     let appName: String
@@ -45,6 +48,9 @@ struct NotificationPosted: Codable {
     let postedAt: Int64
 }
 struct NotificationKey: Codable { let key: String }
+struct NotificationFilter: Codable { let excludedPackages: [String] }
+struct NotificationSync: Codable { let sinceTime: Int64 }
+struct NotificationBatch: Codable { let notifications: [NotificationPosted]; let activeKeys: [String]; let done: Bool }
 struct SmsReceived: Codable { let address: String; let body: String; let receivedAt: Int64 }
 struct SmsSend: Codable { let requestId: String; let address: String; let body: String; var threadId: Int64? = nil }
 struct SmsSent: Codable { let requestId: String; let ok: Bool; let error: String? }

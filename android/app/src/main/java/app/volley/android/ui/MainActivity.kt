@@ -3,6 +3,7 @@ package app.volley.android.ui
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -58,6 +59,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.volley.android.graph
+import app.volley.android.notifications.TestNotifications
 import app.volley.android.session.SessionState
 import app.volley.android.transport.DiscoveredMac
 
@@ -109,6 +111,9 @@ private fun VolleyScreen() {
     val contactsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         contactsGranted = it
     }
+    val postLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) TestNotifications.post(context)
+    }
 
     Column(
         Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -128,6 +133,16 @@ private fun VolleyScreen() {
             PermissionRow("Notification access", listenerEnabled) {
                 context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             }
+        }
+
+        Section("Testing") {
+            OutlinedButton(onClick = {
+                val needsPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                    PackageManager.PERMISSION_GRANTED
+                if (needsPermission) postLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                else TestNotifications.post(context)
+            }) { Text("Send test notification", color = Cocoa) }
         }
 
         val paired = pairing

@@ -11,7 +11,7 @@ docs/      PROTOCOL.md: the JSON wire protocol shared by both
 ## How it works
 
 1. The Mac app advertises `_volley._tcp` on your network and listens for a WebSocket.
-2. The phone finds it, pairs once with a 6-digit code, and gets a token (stored in the Mac's Keychain).
+2. The phone finds it, pairs once with a 6-digit code, and gets a token (the Mac keeps only a hash of it).
 3. After that the phone reconnects on its own and streams `notification.posted` / `sms.received`.
    Replies and "Dismiss on phone" go back as `sms.send` / `notification.dismiss`.
 
@@ -30,10 +30,14 @@ Run it, then click the arc icon in the menu bar and choose **Pair a phone**. All
 Choose **Open Volley** for the messages window: your phone's battery, charging, cell and Wi-Fi status,
 today's text conversations, and a chat view to reply. Messages are kept on the Mac in
 `~/Library/Containers/app.volley.mac/Data/Library/Application Support/Volley/volley.sqlite`.
+The **Notifications** area keeps every notification the phone mirrors, marks what's new since you last
+looked, and has fuzzy search. Use **Mirrored Apps…** (or right-click → Don't Mirror) to stop mirroring apps
+that already notify you on the Mac, like Slack. The menu bar shows how many are new.
 
 **Android**
 Open `android/` in Android Studio and run on a device on the same Wi-Fi, or run `./gradlew installDebug`.
 In the app: grant **Text messages**, **Contacts** and **Notification access**, pick your Mac and enter the code.
+**Send test notification** posts one on demand so you can check mirroring end to end.
 
 On Android 13+, a sideloaded app needs one extra step before you can grant Notification access:
 go to App info → ⋮ → **Allow restricted settings**.
@@ -44,5 +48,7 @@ go to App info → ⋮ → **Allow restricted settings**.
   certificate, pinned on the phone during pairing.
 - The phone's token is in plain SharedPreferences; it should move to the Android Keystore.
 - Google Play only allows SMS permissions for default SMS apps, so for now the Android app has to be sideloaded.
+- Android only exposes notifications that are still showing, so one posted and cleared while the Mac was
+  disconnected can't be recovered.
 - Only text SMS are mirrored; MMS (pictures, group chats) isn't yet. History starts from today when first synced.
 - Only one phone is connected at a time.

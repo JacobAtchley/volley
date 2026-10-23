@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Security
 
@@ -14,46 +15,89 @@ protocol TrustStore {
     func remove(deviceId: String)
 }
 
-/// Tokens live in the Keychain; the non-secret device list (id + name) in UserDefaults.
-final class KeychainTrustStore: TrustStore {
-    private let service = "app.volley.mac.devices"
+/// Stores only a SHA-256 hash of each phone's token, in the app's sandboxed defaults, plus the
+/// non-secret device list (id + name). The Mac only ever checks a presented token, so it never needs
+/// the token back, and nothing here can trigger a Keychain prompt.
+final class HashedTrustStore: TrustStore {
     private let indexKey = "pairedDevices"
+    private let hashesKey = "pairedTokenHashes"
     private let defaults: UserDefaults
+    private let legacy: LegacyTokenSource?
+    private let lock = NSLock()
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, legacy: LegacyTokenSource? = nil) {
         self.defaults = defaults
+        self.legacy = legacy
     }
 
     func all() -> [PairedDevice] {
-        let raw = defaults.dictionary(forKey: indexKey) as? [String: String] ?? [:]
-        return raw.map { PairedDevice(id: $0.key, name: $0.value) }.sorted { $0.name < $1.name }
+        index.map { PairedDevice(id: $0.key, name: $0.value) }.sorted { $0.name < $1.name }
     }
 
     func verify(deviceId: String, token: String) -> PairedDevice? {
-        guard let stored = readToken(deviceId), Secure.equals(stored, token) else { return nil }
+        guard let stored = hashes[deviceId], Secure.equals(stored, Self.hash(token)) else { return nil }
         return all().first { $0.id == deviceId }
     }
 
     func save(_ device: PairedDevice, token: String) {
-        deleteToken(device.id)
-        var q = query(device.id)
-        q[kSecValueData as String] = Data(token.utf8)
-        q[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(q as CFDictionary, nil)
-
-        var raw = defaults.dictionary(forKey: indexKey) as? [String: String] ?? [:]
-        raw[device.id] = device.name
-        defaults.set(raw, forKey: indexKey)
+        lock.withLock {
+            var i = index, h = hashes
+            i[device.id] = device.name
+            h[device.id] = Self.hash(token)
+            defaults.set(i, forKey: indexKey)
+            defaults.set(h, forKey: hashesKey)
+        }
+        legacy?.delete(deviceId: device.id)
     }
 
     func remove(deviceId: String) {
-        deleteToken(deviceId)
-        var raw = defaults.dictionary(forKey: indexKey) as? [String: String] ?? [:]
-        raw[deviceId] = nil
-        defaults.set(raw, forKey: indexKey)
+        lock.withLock {
+            var i = index, h = hashes
+            i[deviceId] = nil
+            h[deviceId] = nil
+            defaults.set(i, forKey: indexKey)
+            defaults.set(h, forKey: hashesKey)
+        }
+        legacy?.delete(deviceId: deviceId)
     }
 
-    private func readToken(_ deviceId: String) -> String? {
+    /// Moves tokens saved by older builds out of the Keychain. Reading them may show a Keychain prompt,
+    /// so call this off the main thread; until it finishes those phones just retry.
+    func migrateLegacyTokens() {
+        guard let legacy else { return }
+        let pending = lock.withLock { index.keys.filter { hashes[$0] == nil } }
+        for deviceId in pending {
+            guard let token = legacy.token(for: deviceId) else { continue }
+            // The read may have waited on a prompt; the phone could have re-paired or been removed meanwhile.
+            let migrated = lock.withLock {
+                var h = hashes
+                guard h[deviceId] == nil, index[deviceId] != nil else { return false }
+                h[deviceId] = Self.hash(token)
+                defaults.set(h, forKey: hashesKey)
+                return true
+            }
+            if migrated { legacy.delete(deviceId: deviceId) }
+        }
+    }
+
+    private var index: [String: String] { defaults.dictionary(forKey: indexKey) as? [String: String] ?? [:] }
+    private var hashes: [String: String] { defaults.dictionary(forKey: hashesKey) as? [String: String] ?? [:] }
+
+    private static func hash(_ token: String) -> String {
+        SHA256.hash(data: Data(token.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+/// Where builds before the hashed store kept tokens.
+protocol LegacyTokenSource {
+    func token(for deviceId: String) -> String?
+    func delete(deviceId: String)
+}
+
+struct KeychainLegacyTokens: LegacyTokenSource {
+    private let service = "app.volley.mac.devices"
+
+    func token(for deviceId: String) -> String? {
         var q = query(deviceId)
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -62,7 +106,7 @@ final class KeychainTrustStore: TrustStore {
         return String(data: data, encoding: .utf8)
     }
 
-    private func deleteToken(_ deviceId: String) {
+    func delete(deviceId: String) {
         SecItemDelete(query(deviceId) as CFDictionary)
     }
 

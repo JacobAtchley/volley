@@ -25,4 +25,13 @@ class ProtocolTest {
         assertFalse("cellLevel" in body)
         assertEquals("device.status", Codec.decode(frame)!!.type)
     }
+
+    @Test
+    fun notificationBatch_roundTrips() {
+        val n = NotificationPosted("k1", "com.slack", "Slack", "Ana", "deploy is green", 1_000)
+        val batch = NotificationBatch(listOf(n), activeKeys = listOf("k1", "k2"), done = true)
+        val env = Codec.decode(Codec.encode(MsgType.NOTIFICATION_BATCH, batch))!!
+        assertEquals("notification.batch", env.type)
+        assertEquals(batch, env.bodyAs<NotificationBatch>())
+    }
 }

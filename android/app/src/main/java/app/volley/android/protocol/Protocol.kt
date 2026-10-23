@@ -31,6 +31,9 @@ object MsgType {
     const val SMS_SYNC = "sms.sync"
     const val SMS_BATCH = "sms.batch"
     const val DEVICE_STATUS = "device.status"
+    const val NOTIFICATION_FILTER = "notification.filter"
+    const val NOTIFICATION_SYNC = "notification.sync"
+    const val NOTIFICATION_BATCH = "notification.batch"
 }
 
 @Serializable data class PairRequest(val deviceId: String, val deviceName: String, val code: String)
@@ -49,6 +52,15 @@ data class NotificationPosted(
 )
 
 @Serializable data class NotificationKey(val key: String)
+@Serializable data class NotificationFilter(val excludedPackages: List<String> = emptyList())
+@Serializable data class NotificationSync(val sinceTime: Long)
+
+@Serializable
+data class NotificationBatch(
+    val notifications: List<NotificationPosted> = emptyList(),
+    val activeKeys: List<String> = emptyList(),
+    val done: Boolean,
+)
 @Serializable data class SmsReceived(val address: String, val body: String, val receivedAt: Long)
 @Serializable data class SmsSend(val requestId: String, val address: String, val body: String, val threadId: Long? = null)
 @Serializable data class SmsSent(val requestId: String, val ok: Boolean, val error: String? = null)

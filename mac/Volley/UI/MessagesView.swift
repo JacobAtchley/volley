@@ -3,38 +3,49 @@ import SwiftUI
 /// Messages.app-style window: the phone, its conversations, and the open chat.
 struct MessagesView: View {
     let session: PhoneSession
-    @State private var phoneSelected = true
+    @State private var selectedNotification: StoredNotification.ID?
 
     var body: some View {
         if let device = session.currentDevice {
             NavigationSplitView {
-                List(selection: $phoneSelected.asSelection) {
+                List(selection: Binding(get: { session.area }, set: { if let area = $0 { session.select(area: area) } })) {
                     PhoneCard(device: device, connected: session.isConnected, status: session.deviceStatus)
-                        .tag(true)
+                        .selectionDisabled()
+                    Label("SMS", systemImage: "message").tag(PhoneArea.sms)
+                    Label("Notifications", systemImage: "bell")
+                        .badge(session.newNotificationCount)
+                        .tag(PhoneArea.notifications)
                 }
                 .navigationSplitViewColumnWidth(min: 220, ideal: 240)
             } content: {
-                ConversationList(session: session)
-                    .navigationSplitViewColumnWidth(min: 240, ideal: 280)
+                Group {
+                    switch session.area {
+                    case .sms: ConversationList(session: session)
+                    case .notifications: NotificationList(session: session, selection: $selectedNotification)
+                    }
+                }
+                .navigationSplitViewColumnWidth(min: 260, ideal: 300)
             } detail: {
-                if let threadId = session.openThreadId {
-                    // New identity per conversation so a draft never carries over to another thread.
-                    ChatView(session: session).id(threadId)
-                } else {
-                    Placeholder(text: "Choose a conversation")
+                switch session.area {
+                case .sms:
+                    if let threadId = session.openThreadId {
+                        // New identity per conversation so a draft never carries over to another thread.
+                        ChatView(session: session).id(threadId)
+                    } else {
+                        Placeholder(text: "Choose a conversation")
+                    }
+                case .notifications:
+                    if let n = session.notificationHistory.first(where: { $0.id == selectedNotification }) {
+                        NotificationDetail(session: session, notification: n)
+                    } else {
+                        Placeholder(text: "Choose a notification")
+                    }
                 }
             }
             .tint(.coral)
         } else {
             PairPrompt(session: session)
         }
-    }
-}
-
-private extension Binding where Value == Bool {
-    /// Single-row selection that can't be cleared.
-    var asSelection: Binding<Bool?> {
-        Binding<Bool?>(get: { wrappedValue }, set: { _ in wrappedValue = true })
     }
 }
 
@@ -247,7 +258,7 @@ private struct Bubble: View {
 
 // MARK: - Empty states
 
-private struct Placeholder: View {
+struct Placeholder: View {
     let text: String
     var body: some View {
         Text(text).font(.title3).foregroundStyle(.secondary)
@@ -279,7 +290,7 @@ private struct PairPrompt: View {
 }
 
 /// Time for today, weekday within a week, else a short date.
-private func shortTime(_ date: Date) -> String {
+func shortTime(_ date: Date) -> String {
     let cal = Calendar.current
     if cal.isDateInToday(date) { return date.formatted(date: .omitted, time: .shortened) }
     if let days = cal.dateComponents([.day], from: date, to: Date()).day, days < 7 {

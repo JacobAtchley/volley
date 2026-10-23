@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import GRDB
 import os
@@ -27,6 +28,26 @@ struct StoredStatus: Equatable {
     let lastSeen: Date
 }
 
+/// One version of a phone notification. A changed title or text is a new row; see `contentHash`.
+struct StoredNotification: Identifiable, Equatable {
+    let key: String
+    let contentHash: String
+    let pkg: String
+    let appName: String
+    let title: String
+    let text: String
+    let postedAt: Date
+    let receivedAt: Date
+    let cleared: Bool
+    var id: String { key + ":" + contentHash }
+}
+
+struct AppRef: Hashable, Identifiable {
+    let pkg: String
+    let name: String
+    var id: String { pkg }
+}
+
 /// Messages and phone status mirrored from each paired phone. Errors are logged, not thrown.
 protocol MessageStore: AnyObject {
     func upsert(_ records: [SmsRecord], deviceId: String)
@@ -40,6 +61,19 @@ protocol MessageStore: AnyObject {
     func markSeen(deviceId: String, at: Date)
     func status(deviceId: String) -> StoredStatus?
     func deleteDevice(_ deviceId: String)
+
+    func upsertNotification(_ n: NotificationPosted, deviceId: String, receivedAt: Date)
+    /// Newest first; notifications from excluded apps are left out.
+    func notifications(deviceId: String) -> [StoredNotification]
+    func markNotificationCleared(deviceId: String, key: String)
+    /// Marks every not-yet-cleared notification whose key isn't in `activeKeys` as cleared.
+    func clearNotifications(deviceId: String, notIn activeKeys: Set<String>)
+    func lastViewedNotifications(deviceId: String) -> Date?
+    func setLastViewedNotifications(deviceId: String, at: Date)
+    func excludedApps() -> [AppRef]
+    func setExcluded(_ app: AppRef, _ excluded: Bool)
+    /// Apps seen in this phone's notifications, plus excluded ones, by name.
+    func seenApps(deviceId: String) -> [AppRef]
 }
 
 /// SQLite via GRDB. Dates are stored as epoch milliseconds, matching the wire protocol.
@@ -93,6 +127,26 @@ final class GRDBMessageStore: MessageStore {
                     wifi_connected INTEGER,
                     last_seen INTEGER NOT NULL
                 );
+                """)
+        }
+        m.registerMigration("v2") { db in
+            try db.execute(sql: """
+                CREATE TABLE notifications (
+                    device_id TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    posted_at INTEGER NOT NULL,
+                    pkg TEXT NOT NULL,
+                    app_name TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    received_at INTEGER NOT NULL,
+                    cleared INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (device_id, key, content_hash)
+                );
+                CREATE INDEX notifications_posted ON notifications (device_id, posted_at);
+                CREATE TABLE excluded_apps (pkg TEXT PRIMARY KEY, app_name TEXT NOT NULL);
+                CREATE TABLE notification_views (device_id TEXT PRIMARY KEY, last_viewed INTEGER NOT NULL);
                 """)
         }
         return m
@@ -200,13 +254,112 @@ final class GRDBMessageStore: MessageStore {
 
     func deleteDevice(_ deviceId: String) {
         write { db in
-            for table in ["messages", "contacts", "device_status"] {
+            for table in ["messages", "contacts", "device_status", "notifications", "notification_views"] {
                 try db.execute(sql: "DELETE FROM \(table) WHERE device_id = ?", arguments: [deviceId])
             }
         }
     }
 
+    // MARK: - Notifications
+
+    func upsertNotification(_ n: NotificationPosted, deviceId: String, receivedAt: Date) {
+        write { db in
+            try db.execute(sql: """
+                INSERT INTO notifications
+                    (device_id, key, content_hash, posted_at, pkg, app_name, title, text, received_at, cleared)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                ON CONFLICT (device_id, key, content_hash) DO UPDATE SET
+                    -- A newer post of the same text means it's showing on the phone again.
+                    cleared = CASE WHEN excluded.posted_at > posted_at THEN 0 ELSE cleared END,
+                    -- Only a genuinely newer post is "received" again; a reconnect resend is not new.
+                    received_at = CASE WHEN excluded.posted_at > posted_at THEN excluded.received_at ELSE received_at END,
+                    posted_at = MAX(posted_at, excluded.posted_at)
+                """, arguments: [deviceId, n.key, Self.contentHash(n), n.postedAt, n.pkg, n.appName, n.title, n.text,
+                                 Self.millis(receivedAt)])
+        }
+    }
+
+    func notifications(deviceId: String) -> [StoredNotification] {
+        read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT * FROM notifications
+                WHERE device_id = ? AND pkg NOT IN (SELECT pkg FROM excluded_apps)
+                ORDER BY posted_at DESC, received_at DESC
+                """, arguments: [deviceId]).map { row in
+                StoredNotification(key: row["key"], contentHash: row["content_hash"], pkg: row["pkg"],
+                                   appName: row["app_name"], title: row["title"], text: row["text"],
+                                   postedAt: Self.date(row["posted_at"]), receivedAt: Self.date(row["received_at"]),
+                                   cleared: row["cleared"])
+            }
+        } ?? []
+    }
+
+    func markNotificationCleared(deviceId: String, key: String) {
+        write { db in
+            try db.execute(sql: "UPDATE notifications SET cleared = 1 WHERE device_id = ? AND key = ?",
+                           arguments: [deviceId, key])
+        }
+    }
+
+    func clearNotifications(deviceId: String, notIn activeKeys: Set<String>) {
+        write { db in
+            let keys = try String.fetchAll(db, sql: "SELECT DISTINCT key FROM notifications WHERE device_id = ? AND cleared = 0",
+                                           arguments: [deviceId])
+            for key in keys where !activeKeys.contains(key) {
+                try db.execute(sql: "UPDATE notifications SET cleared = 1 WHERE device_id = ? AND key = ?",
+                               arguments: [deviceId, key])
+            }
+        }
+    }
+
+    func lastViewedNotifications(deviceId: String) -> Date? {
+        read { db in
+            try Int64.fetchOne(db, sql: "SELECT last_viewed FROM notification_views WHERE device_id = ?", arguments: [deviceId])
+        }.flatMap { $0 }.map(Self.date)
+    }
+
+    func setLastViewedNotifications(deviceId: String, at: Date) {
+        write { db in
+            try db.execute(sql: "INSERT OR REPLACE INTO notification_views (device_id, last_viewed) VALUES (?, ?)",
+                           arguments: [deviceId, Self.millis(at)])
+        }
+    }
+
+    func excludedApps() -> [AppRef] {
+        read { db in
+            try Row.fetchAll(db, sql: "SELECT pkg, app_name FROM excluded_apps ORDER BY app_name COLLATE NOCASE")
+                .map { AppRef(pkg: $0[0], name: $0[1]) }
+        } ?? []
+    }
+
+    func setExcluded(_ app: AppRef, _ excluded: Bool) {
+        write { db in
+            if excluded {
+                try db.execute(sql: "INSERT OR REPLACE INTO excluded_apps (pkg, app_name) VALUES (?, ?)",
+                               arguments: [app.pkg, app.name])
+            } else {
+                try db.execute(sql: "DELETE FROM excluded_apps WHERE pkg = ?", arguments: [app.pkg])
+            }
+        }
+    }
+
+    func seenApps(deviceId: String) -> [AppRef] {
+        read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT pkg, MAX(app_name) AS name FROM (
+                    SELECT pkg, app_name FROM notifications WHERE device_id = ?
+                    UNION SELECT pkg, app_name FROM excluded_apps
+                ) GROUP BY pkg ORDER BY name COLLATE NOCASE
+                """, arguments: [deviceId]).map { AppRef(pkg: $0[0], name: $0[1]) }
+        } ?? []
+    }
+
     // MARK: - Helpers
+
+    /// Stable across launches (unlike `hashValue`), so the same notification text maps to the same row.
+    private static func contentHash(_ n: NotificationPosted) -> String {
+        SHA256.hash(data: Data((n.title + "\u{1F}" + n.text).utf8)).map { String(format: "%02x", $0) }.joined()
+    }
 
     private func read<T>(_ body: (Database) throws -> T) -> T? {
         do { return try db.read(body) } catch {

@@ -32,6 +32,9 @@ The Mac is the server; the phone is the client.
 | `sms.sent`             | phone → mac  | `requestId`, `ok`, `error?` |
 | `sms.sync`             | mac → phone  | `sinceId` (phone SMS `_id`, 0 if none), `sinceTime` (epoch ms), `pendingIds` (ids the Mac holds as pending) |
 | `sms.batch`            | phone → mac  | `messages` (`[SmsRecord]`), `done` |
+| `notification.filter`  | mac → phone  | `excludedPackages` (`[String]`) |
+| `notification.sync`    | mac → phone  | `sinceTime` (epoch ms) |
+| `notification.batch`   | phone → mac  | `notifications` (`[notification.posted body]`), `activeKeys` (`[String]`), `done` |
 | `device.status`        | phone → mac  | `battery` (0–100), `charging`, `cellLevel?` (0–4), `wifiLevel?` (0–4), `wifiConnected` |
 
 `SmsRecord`: `id` (phone SMS `_id`), `threadId`, `address`, `contactName?`, `body`, `date` (epoch ms),
@@ -52,6 +55,17 @@ Android 14+: `creator=app.volley.android`), so the Mac's copy comes back through
 
 `sms.received` is still sent for incoming SMS; the Mac uses it only for desktop notifications.
 
+## Notification history sync
+
+1. After authenticating, the Mac sends `notification.filter` (apps the user excluded; the phone stops mirroring
+   them, live and in sync, and remembers the list), then `sms.sync`, then `notification.sync` with
+   `sinceTime` = local midnight.
+2. Android only exposes notifications that are still showing, so the phone replies with one `notification.batch`
+   (`done: true`): `notifications` = mirrorable notifications still showing that were posted since `sinceTime`;
+   `activeKeys` = every mirrorable key still showing, any day. The Mac marks its rows whose key is absent as
+   cleared. Synced notifications don't raise desktop banners.
+3. `notification.removed` is sent for any mirrorable key, whether or not the phone forwarded it this session.
+
 The phone sends `device.status` once after authenticating and then when a value changes,
 at most every 30 s (a charging change is sent immediately).
 
@@ -59,6 +73,6 @@ Liveness uses WebSocket ping/pong frames, not envelopes.
 
 ## Security (v1 limitations)
 
-- The token is 32 random bytes (base64url), issued once at pairing; the Mac keeps it in the Keychain.
+- The token is 32 random bytes (base64url), issued once at pairing. The Mac stores only its SHA-256 hash (in its sandboxed preferences) and compares hashes in constant time; builds before this kept the token in the Keychain and migrate it on launch.
 - **v1 is plaintext `ws://` on the LAN.** Next step: TLS with a self-signed Mac certificate
   whose SHA-256 fingerprint is exchanged during pairing and pinned on the phone.
