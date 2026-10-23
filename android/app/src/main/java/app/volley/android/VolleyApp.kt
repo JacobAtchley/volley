@@ -3,6 +3,10 @@ package app.volley.android
 import android.app.Application
 import android.content.Context
 import android.os.Build
+import app.volley.android.files.AndroidFiles
+import app.volley.android.files.DiskFileService
+import app.volley.android.files.FileHandlers
+import app.volley.android.files.StoragePaths
 import app.volley.android.notifications.ExcludedPackages
 import app.volley.android.protocol.MsgType
 import app.volley.android.protocol.NotificationFilter
@@ -72,7 +76,26 @@ class AppGraph(context: Context) {
     private val smsObserver = SmsObserver(context.contentResolver, scope) { syncer.onChanged() }
     private val statusReporter = DeviceStatusReporter(context, scope) { session.send(it) }
 
+    private val androidFiles = AndroidFiles(context)
+    private val fileHandlers = FileHandlers(
+        files = DiskFileService(StoragePaths(androidFiles.root), androidFiles::thumbnail),
+        send = { session.send(it) },
+        sendBinary = { session.sendBinary(it) },
+        hasAccess = androidFiles::hasAccess,
+        onTransferActive = androidFiles::setTransferActive,
+        scan = androidFiles::scan,
+    )
+    private var lastFileAccess: Boolean? = null
+
+    /** Tells the Mac if All files access changed (call when returning from the permission screen). */
+    fun refreshFileAccess() {
+        val access = androidFiles.hasAccess()
+        if (access != lastFileAccess && session.send(fileHandlers.statusFrame())) lastFileAccess = access
+    }
+
     init {
+        fileHandlers.types.forEach { type -> session.on(type) { fileHandlers.handle(it) } }
+        session.onBinary = fileHandlers::onBinary
         session.on(MsgType.SMS_SYNC, SmsSyncHandler(syncer))
         session.on(MsgType.NOTIFICATION_FILTER) { env ->
             env.bodyAs<NotificationFilter>()?.let { excludedPackages.set(it.excludedPackages.toSet()) }
@@ -83,10 +106,13 @@ class AppGraph(context: Context) {
                 if (state is SessionState.Connected) {
                     smsObserver.start()
                     statusReporter.start()
+                    lastFileAccess = null
+                    refreshFileAccess()
                 } else {
                     smsObserver.stop()
                     statusReporter.stop()
                     syncer.reset()
+                    fileHandlers.onDisconnect()
                 }
             }
         }
