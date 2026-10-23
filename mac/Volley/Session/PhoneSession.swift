@@ -45,7 +45,7 @@ struct MirroredNotification: Identifiable {
 }
 
 /// A section of the window under the phone card.
-enum PhoneArea: Hashable { case sms, notifications }
+enum PhoneArea: Hashable { case sms, notifications, files }
 
 /// Authenticates the phone, routes its messages, and holds the UI state.
 @MainActor

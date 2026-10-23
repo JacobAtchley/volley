@@ -57,7 +57,8 @@ final class FileSession {
     @ObservationIgnored private var active: Active?
 
     private enum Job {
-        case download(remote: String, into: URL, then: ((URL) -> Void)?)
+        /// `then` gets the saved file, or nil if the download failed or was cancelled.
+        case download(remote: String, into: URL, then: ((URL?) -> Void)?)
         case upload(local: URL, dir: String)
     }
 
@@ -152,7 +153,7 @@ final class FileSession {
     }
 
     /// Downloads phone paths (files or folders) into a Mac folder.
-    func download(_ paths: [String], to dir: URL, then: ((URL) -> Void)? = nil) {
+    func download(_ paths: [String], to dir: URL, then: ((URL?) -> Void)? = nil) {
         for remote in paths {
             let name = (remote as NSString).lastPathComponent
             if entries.first(where: { childPath($0.name) == remote })?.isDir == true {
@@ -179,7 +180,7 @@ final class FileSession {
 
     func openInDefaultApp(_ remote: String) {
         try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        enqueue(.download(remote: remote, into: tempDir, then: { [openURL] in openURL($0) }),
+        enqueue(.download(remote: remote, into: tempDir, then: { [openURL] url in url.map(openURL) }),
                 name: (remote as NSString).lastPathComponent, size: 0, direction: .download)
     }
 
@@ -188,12 +189,12 @@ final class FileSession {
         switch transfers[index].state {
         case .queued:
             transfers[index].state = .cancelled
-            jobs[id] = nil
+            finishJob(id, url: nil)
         case .running:
             link.sendMessage(MsgType.fsCancel, FsCancel(transferId: id.uuidString))
             abandonActive(deletePartial: true)
             transfers[index].state = .cancelled
-            jobs[id] = nil
+            finishJob(id, url: nil)
             startNext()
         default:
             break
@@ -257,7 +258,7 @@ final class FileSession {
         for index in transfers.indices where transfers[index].state == .queued || transfers[index].state == .running {
             transfers[index].state = .failed("Phone disconnected")
         }
-        jobs.removeAll()
+        jobs.keys.forEach { finishJob($0, url: nil) }
         listWaiters.values.forEach { $0.resume(returning: nil) }
         listWaiters.removeAll()
         deleteWaiters.values.forEach { waiter in
@@ -450,8 +451,13 @@ final class FileSession {
         guard let current = active else { return }
         abandonActive(deletePartial: true)
         update(current.id) { $0.state = .failed(message) }
-        jobs[current.id] = nil
+        finishJob(current.id, url: nil)
         startNext()
+    }
+
+    /// Drops a job, telling a waiting download it won't produce a file.
+    private func finishJob(_ id: UUID, url: URL?) {
+        if case let .download(_, _, then) = jobs.removeValue(forKey: id), url == nil { then?(nil) }
     }
 
     private func abandonActive(deletePartial: Bool) {

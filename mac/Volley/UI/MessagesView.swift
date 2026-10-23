@@ -19,6 +19,7 @@ struct MessagesView: View {
                     Label("Notifications", systemImage: "bell")
                         .badge(session.newNotificationCount)
                         .tag(PhoneArea.notifications)
+                    Label("Files", systemImage: "folder").tag(PhoneArea.files)
                 }
                 .navigationSplitViewColumnWidth(min: 220, ideal: 240)
             } content: {
@@ -26,9 +27,11 @@ struct MessagesView: View {
                     switch session.area {
                     case .sms: ConversationList(session: session)
                     case .notifications: NotificationList(session: session, selection: $selectedNotification)
+                    case .files:
+                        if let files = session.files { FilesView(files: files, connected: session.isConnected) }
                     }
                 }
-                .navigationSplitViewColumnWidth(min: 260, ideal: 300)
+                .navigationSplitViewColumnWidth(min: 260, ideal: session.area == .files ? 560 : 300)
             } detail: {
                 switch session.area {
                 case .sms:
@@ -44,6 +47,8 @@ struct MessagesView: View {
                     } else {
                         Placeholder(text: "Choose a notification")
                     }
+                case .files:
+                    if let files = session.files { TransfersView(files: files) }
                 }
             }
             .tint(.coral)

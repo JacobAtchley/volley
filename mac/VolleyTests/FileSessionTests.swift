@@ -226,4 +226,19 @@ final class FileSessionTests: XCTestCase {
         XCTAssertEqual(files.viewMode(for: "Pictures"), .icons)
         XCTAssertEqual(files.viewMode(for: "Download"), .list)
     }
+
+    func testFailedDownloadTellsWaiter() throws {
+        var results: [URL?] = []
+        files.download(["a.bin"], to: dir, then: { results.append($0) })
+        let req = try XCTUnwrap(link.bodies(MsgType.fsDownload, as: FsDownload.self).last)
+        deliver(MsgType.fsDone, FsDone(transferId: req.transferId, ok: false, error: "Not found"))
+        XCTAssertEqual(results, [nil])
+    }
+
+    func testDisconnectTellsQueuedWaiters() {
+        var results: [URL?] = []
+        files.download(["a.bin", "b.bin"], to: dir, then: { results.append($0) })
+        files.disconnected()
+        XCTAssertEqual(results, [nil, nil])
+    }
 }
