@@ -8,7 +8,9 @@ final class FakeTransport: PhoneTransport {
 
     func start() {}
     func stop() {}
+    private(set) var sentBinary: [Data] = []
     func send(_ data: Data, to id: ConnectionID, closeAfter: Bool) { sent.append(data) }
+    func sendBinary(_ data: Data, to id: ConnectionID) { sentBinary.append(data) }
     func close(_ id: ConnectionID) { closed.append(id) }
 
     /// Bodies of sent frames of `type`, decoded as `B`.

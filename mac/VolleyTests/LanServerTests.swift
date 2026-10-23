@@ -19,7 +19,8 @@ final class LanServerTests: XCTestCase {
         }
     }
 
-    private let port = UInt16.random(in: 49_200...49_900)
+    // Below the ephemeral range (49152+), so outgoing connections can't already hold it.
+    private let port = UInt16.random(in: 40_000...44_000)
 
     func testListensOnPreferredPort() async {
         let server = LanServer(serviceName: "VolleyTest-\(UUID().uuidString.prefix(6))", txt: [:], port: port)
@@ -38,5 +39,36 @@ final class LanServerTests: XCTestCase {
         let secondPort = await readyPort(second)
         XCTAssertNotNil(secondPort)
         XCTAssertNotEqual(secondPort, port)
+    }
+
+    func testBinaryFrameRoundTrip() async throws {
+        let server = LanServer(serviceName: "VolleyTest-\(UUID().uuidString.prefix(6))", txt: [:], port: port)
+        defer { server.stop() }
+        var opened: ConnectionID?
+        var received: Data?
+        let ready = expectation(description: "ready")
+        let gotBinary = expectation(description: "binary")
+        server.onEvent = { event in
+            switch event {
+            case .ready: ready.fulfill()
+            case .opened(let id): opened = id
+            case let .binary(_, data): received = data; gotBinary.fulfill()
+            default: break
+            }
+        }
+        server.start()
+        await fulfillment(of: [ready], timeout: 5)
+
+        let url = try XCTUnwrap(URL(string: "ws://127.0.0.1:\(port)/"))
+        let client = URLSession.shared.webSocketTask(with: url)
+        client.resume()
+        try await client.send(.data(Data([1, 2, 3])))
+        await fulfillment(of: [gotBinary], timeout: 5)
+        XCTAssertEqual(received, Data([1, 2, 3]))
+
+        server.sendBinary(Data([9]), to: try XCTUnwrap(opened))
+        guard case let .data(echo) = try await client.receive() else { return XCTFail("expected binary") }
+        XCTAssertEqual(echo, Data([9]))
+        client.cancel(with: .normalClosure, reason: nil)
     }
 }

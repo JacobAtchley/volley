@@ -86,6 +86,10 @@ final class PhoneSession {
     @ObservationIgnored private var unauthenticated = Set<ConnectionID>()
     @ObservationIgnored private var active: (conn: ConnectionID, deviceId: String)?
     @ObservationIgnored private var pendingSends: [PendingSend] = []
+    /// Binary frames from the authenticated phone (file chunks).
+    @ObservationIgnored var onBinary: ((Data) -> Void)?
+    /// The authenticated phone's connection closed.
+    @ObservationIgnored var onDisconnect: (() -> Void)?
 
     private static let lastDeviceKey = "lastDeviceId"
     /// How far apart a Mac send and the phone's stored copy may be timestamped and still match.
@@ -217,11 +221,14 @@ final class PhoneSession {
                 guard let self, self.unauthenticated.contains(id) else { return }
                 self.transport.close(id)
             }
+        case .binary(let id, let data):
+            if active?.conn == id { onBinary?(data) }
         case .text(let id, let data):
             route(id, data)
         case .closed(let id):
             unauthenticated.remove(id)
             if let current = active, current.conn == id {
+                onDisconnect?()
                 store.markSeen(deviceId: current.deviceId, at: Date())
                 active = nil
                 status = .waiting
@@ -351,6 +358,14 @@ final class PhoneSession {
                                           sinceTime: Int64(midnight.timeIntervalSince1970 * 1000),
                                           pendingIds: store.pendingPhoneIds(deviceId: deviceId)))
         _ = send(MsgType.notificationSync, NotificationSync(sinceTime: Int64(midnight.timeIntervalSince1970 * 1000)))
+    }
+
+    /// Sends a binary frame to the authenticated phone. False when no phone is connected.
+    @discardableResult
+    func sendBinary(_ data: Data) -> Bool {
+        guard let conn = active?.conn else { return false }
+        transport.sendBinary(data, to: conn)
+        return true
     }
 
     @discardableResult
