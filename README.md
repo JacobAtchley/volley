@@ -1,11 +1,27 @@
-# Volley
+<p align="center">
+  <img src="docs/brand/volley-mark.svg" width="96" height="96" alt="Volley logo: an arc served from one dot to another">
+</p>
 
-Mirror your Android phone's SMS and notifications to your Mac.
+<h1 align="center">volley</h1>
+
+<p align="center"><b>Your Android phone's texts and notifications, on your Mac.</b></p>
+
+<p align="center">
+  <a href="https://github.com/JacobAtchley/volley/actions/workflows/ci.yml"><img src="https://github.com/JacobAtchley/volley/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <img src="https://img.shields.io/badge/macOS-14%2B-FF9E8F?labelColor=2A1F1D" alt="macOS 14+">
+  <img src="https://img.shields.io/badge/Android-8%2B-FF9E8F?labelColor=2A1F1D" alt="Android 8+">
+</p>
+
+<p align="center">💬 Read &amp; reply to SMS · 🔔 Notification history · 🔋 Phone status</p>
+
+<p align="center">A menu bar app pairs with your phone over your Wi‑Fi. No cloud, no account.</p>
+
+## Project layout
 
 ```
 android/   Kotlin app: reads notifications + SMS, sends replies (Android 8.0+)
 mac/       Swift menu bar app: Bonjour WebSocket server, native notifications (macOS 14+)
-docs/      PROTOCOL.md: the JSON wire protocol shared by both
+docs/      PROTOCOL.md: the JSON wire protocol shared by both; brand/: the logo
 ```
 
 ## How it works
