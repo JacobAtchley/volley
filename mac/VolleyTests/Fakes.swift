@@ -1,5 +1,16 @@
 import Foundation
+import XCTest
 @testable import Volley
+
+extension XCTestCase {
+    /// One shared suite, wiped per test: per-test random suites leave files in ~/Library/Preferences
+    /// (cfprefsd rewrites them after deletion), now that the app isn't sandboxed.
+    func scratchDefaults() -> UserDefaults {
+        let name = "app.volley.tests"
+        UserDefaults().removePersistentDomain(forName: name)
+        return UserDefaults(suiteName: name)!
+    }
+}
 
 final class FakeTransport: PhoneTransport {
     var onEvent: (@MainActor (TransportEvent) -> Void)?
@@ -8,7 +19,9 @@ final class FakeTransport: PhoneTransport {
 
     func start() {}
     func stop() {}
+    private(set) var sentBinary: [Data] = []
     func send(_ data: Data, to id: ConnectionID, closeAfter: Bool) { sent.append(data) }
+    func sendBinary(_ data: Data, to id: ConnectionID) { sentBinary.append(data) }
     func close(_ id: ConnectionID) { closed.append(id) }
 
     /// Bodies of sent frames of `type`, decoded as `B`.

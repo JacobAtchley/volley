@@ -45,12 +45,12 @@ struct MirroredNotification: Identifiable {
 }
 
 /// A section of the window under the phone card.
-enum PhoneArea: Hashable { case sms, notifications }
+enum PhoneArea: Hashable { case sms, notifications, files }
 
 /// Authenticates the phone, routes its messages, and holds the UI state.
 @MainActor
 @Observable
-final class PhoneSession {
+final class PhoneSession: FileLink {
     enum Status: Equatable {
         case starting
         case waiting
@@ -86,6 +86,14 @@ final class PhoneSession {
     @ObservationIgnored private var unauthenticated = Set<ConnectionID>()
     @ObservationIgnored private var active: (conn: ConnectionID, deviceId: String)?
     @ObservationIgnored private var pendingSends: [PendingSend] = []
+    /// Binary frames from the authenticated phone (file chunks).
+    @ObservationIgnored var onBinary: ((Data) -> Void)?
+    /// The authenticated phone's connection closed (or it was unpaired).
+    @ObservationIgnored var onDisconnect: (() -> Void)?
+    /// `fs.*` and `file.ack` messages from the authenticated phone.
+    @ObservationIgnored var onFileMessage: ((String, Data) -> Void)?
+    /// The phone's file browser; set by the composition root.
+    @ObservationIgnored var files: FileSession?
 
     private static let lastDeviceKey = "lastDeviceId"
     /// How far apart a Mac send and the phone's stored copy may be timestamped and still match.
@@ -142,6 +150,7 @@ final class PhoneSession {
         pairedDevices = trust.all()
         if let current = active, current.deviceId == device.id {
             // Forget it now: the socket closes asynchronously and frames still in flight must be ignored.
+            onDisconnect?()
             active = nil
             status = .waiting
             transport.close(current.conn)
@@ -217,11 +226,14 @@ final class PhoneSession {
                 guard let self, self.unauthenticated.contains(id) else { return }
                 self.transport.close(id)
             }
+        case .binary(let id, let data):
+            if active?.conn == id { onBinary?(data) }
         case .text(let id, let data):
             route(id, data)
         case .closed(let id):
             unauthenticated.remove(id)
             if let current = active, current.conn == id {
+                onDisconnect?()
                 store.markSeen(deviceId: current.deviceId, at: Date())
                 active = nil
                 status = .waiting
@@ -322,7 +334,7 @@ final class PhoneSession {
             reload()
 
         default:
-            break
+            if type.hasPrefix("fs.") || type == MsgType.fileAck { onFileMessage?(type, data) }
         }
     }
 
@@ -351,6 +363,17 @@ final class PhoneSession {
                                           sinceTime: Int64(midnight.timeIntervalSince1970 * 1000),
                                           pendingIds: store.pendingPhoneIds(deviceId: deviceId)))
         _ = send(MsgType.notificationSync, NotificationSync(sinceTime: Int64(midnight.timeIntervalSince1970 * 1000)))
+    }
+
+    @discardableResult
+    func sendMessage<B: Encodable>(_ type: String, _ body: B) -> Bool { send(type, body) }
+
+    /// Sends a binary frame to the authenticated phone. False when no phone is connected.
+    @discardableResult
+    func sendBinary(_ data: Data) -> Bool {
+        guard let conn = active?.conn else { return false }
+        transport.sendBinary(data, to: conn)
+        return true
     }
 
     @discardableResult

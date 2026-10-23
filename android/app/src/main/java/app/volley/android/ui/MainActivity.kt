@@ -3,8 +3,10 @@ package app.volley.android.ui
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -98,11 +100,14 @@ private fun VolleyScreen() {
 
     var smsGranted by remember { mutableStateOf(false) }
     var contactsGranted by remember { mutableStateOf(false) }
+    var filesGranted by remember { mutableStateOf(false) }
     var listenerEnabled by remember { mutableStateOf(false) }
     LifecycleResumeEffect(Unit) {
         smsGranted = SMS_PERMISSIONS.all {
             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
         }
+        filesGranted = hasAllFilesAccess(context)
+        graph.refreshFileAccess()
         contactsGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) ==
             PackageManager.PERMISSION_GRANTED
         listenerEnabled = context.packageName in NotificationManagerCompat.getEnabledListenerPackages(context)
@@ -114,6 +119,11 @@ private fun VolleyScreen() {
     val contactsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         contactsGranted = it
     }
+    val legacyFilesLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+            filesGranted = hasAllFilesAccess(context)
+            graph.refreshFileAccess()
+        }
     val postLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) TestNotifications.post(context)
     }
@@ -133,6 +143,20 @@ private fun VolleyScreen() {
         Section("Permissions") {
             PermissionRow("Text messages", smsGranted) { smsLauncher.launch(SMS_PERMISSIONS) }
             PermissionRow("Contacts", contactsGranted) { contactsLauncher.launch(Manifest.permission.READ_CONTACTS) }
+            PermissionRow("All files access", filesGranted) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    context.startActivity(
+                        Intent(
+                            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                            Uri.parse("package:${context.packageName}"),
+                        ),
+                    )
+                } else {
+                    legacyFilesLauncher.launch(
+                        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                    )
+                }
+            }
             PermissionRow("Notification access", listenerEnabled) {
                 context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             }
@@ -264,6 +288,14 @@ private fun SessionState.label(): String = when (this) {
     is SessionState.Connected -> "Connected to $macName"
     is SessionState.Failed -> message
 }
+
+private fun hasAllFilesAccess(context: android.content.Context): Boolean =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        Environment.isExternalStorageManager()
+    } else {
+        ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+            PackageManager.PERMISSION_GRANTED
+    }
 
 private val SMS_PERMISSIONS = arrayOf(
     Manifest.permission.RECEIVE_SMS,

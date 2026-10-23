@@ -7,6 +7,7 @@ enum TransportEvent {
     case ready(port: UInt16)
     case opened(ConnectionID)
     case text(ConnectionID, Data)
+    case binary(ConnectionID, Data)
     case closed(ConnectionID)
     case failed(String)
 }
@@ -18,6 +19,7 @@ protocol PhoneTransport: AnyObject {
     func start()
     func stop()
     func send(_ data: Data, to id: ConnectionID, closeAfter: Bool)
+    func sendBinary(_ data: Data, to id: ConnectionID)
     func close(_ id: ConnectionID)
 }
 
@@ -56,10 +58,18 @@ final class LanServer: PhoneTransport {
     }
 
     func send(_ data: Data, to id: ConnectionID, closeAfter: Bool = false) {
+        write(data, opcode: .text, to: id, closeAfter: closeAfter)
+    }
+
+    func sendBinary(_ data: Data, to id: ConnectionID) {
+        write(data, opcode: .binary, to: id, closeAfter: false)
+    }
+
+    private func write(_ data: Data, opcode: NWProtocolWebSocket.Opcode, to id: ConnectionID, closeAfter: Bool) {
         queue.async {
             guard let conn = self.connections[id] else { return }
-            let meta = NWProtocolWebSocket.Metadata(opcode: .text)
-            let ctx = NWConnection.ContentContext(identifier: "text", metadata: [meta])
+            let meta = NWProtocolWebSocket.Metadata(opcode: opcode)
+            let ctx = NWConnection.ContentContext(identifier: "frame", metadata: [meta])
             let done = NWConnection.SendCompletion.contentProcessed { [weak self] _ in
                 if closeAfter { self?.drop(id) }
             }
@@ -150,6 +160,8 @@ final class LanServer: PhoneTransport {
             switch meta?.opcode {
             case .text?:
                 if let data { self.emit(.text(id, data)) }
+            case .binary?:
+                if let data { self.emit(.binary(id, data)) }
             case .close?:
                 self.drop(id)
                 return

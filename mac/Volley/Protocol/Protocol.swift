@@ -18,6 +18,21 @@ enum MsgType {
     static let notificationFilter = "notification.filter"
     static let notificationSync = "notification.sync"
     static let notificationBatch = "notification.batch"
+    static let fsList = "fs.list"
+    static let fsListing = "fs.listing"
+    static let fsThumb = "fs.thumb"
+    static let fsThumbData = "fs.thumbData"
+    static let fsDownload = "fs.download"
+    static let fsUpload = "fs.upload"
+    static let fsUploadReady = "fs.uploadReady"
+    static let fsBegin = "fs.begin"
+    static let fileAck = "file.ack"
+    static let fsEnd = "fs.end"
+    static let fsDone = "fs.done"
+    static let fsCancel = "fs.cancel"
+    static let fsDelete = "fs.delete"
+    static let fsDeleted = "fs.deleted"
+    static let fsStatus = "fs.status"
 }
 
 struct EnvelopeHeader: Decodable {
@@ -73,6 +88,37 @@ struct DeviceStatus: Codable, Equatable {
     let wifiLevel: Int?
     let wifiConnected: Bool
 }
+
+struct FsList: Codable { let requestId: String; let path: String; let showHidden: Bool }
+struct FsEntry: Codable, Equatable, Hashable {
+    let name: String
+    let isDir: Bool
+    let size: Int64
+    let modified: Int64
+    let mime: String?
+}
+struct FsListing: Codable {
+    let requestId: String
+    let path: String
+    let entries: [FsEntry]?
+    let error: String?
+    /// Large folders arrive in pages; nil (older phones) means a single, complete page.
+    var done: Bool?
+}
+struct FsThumb: Codable { let requestId: String; let path: String; let maxPx: Int }
+struct FsThumbData: Codable { let requestId: String; let jpegBase64: String?; let error: String? }
+struct FsDownload: Codable { let transferId: String; let path: String }
+struct FsUpload: Codable { let transferId: String; let dir: String; let name: String; let size: Int64 }
+struct FsUploadReady: Codable { let transferId: String; let finalName: String }
+struct FsBegin: Codable { let transferId: String; let size: Int64; let name: String }
+struct FileAck: Codable { let transferId: String; let received: Int }
+struct FsEnd: Codable { let transferId: String; let sha256: String }
+struct FsDone: Codable { let transferId: String; let ok: Bool; let error: String? }
+struct FsCancel: Codable { let transferId: String }
+struct FsDelete: Codable { let requestId: String; let paths: [String] }
+struct FsDeleteFailure: Codable, Equatable { let path: String; let error: String }
+struct FsDeleted: Codable { let requestId: String; let failed: [FsDeleteFailure]? }
+struct FsStatus: Codable { let allFilesAccess: Bool }
 
 enum Codec {
     private static let decoder = JSONDecoder()

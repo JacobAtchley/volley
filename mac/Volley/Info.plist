@@ -28,5 +28,18 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Volley finds and talks to your phone on your local network.</string>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Volley phone file</string>
+			<key>UTTypeIdentifier</key>
+			<string>app.volley.phone-path</string>
+		</dict>
+	</array>
 </dict>
 </plist>

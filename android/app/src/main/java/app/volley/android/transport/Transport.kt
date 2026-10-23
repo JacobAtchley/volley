@@ -10,6 +10,8 @@ data class Endpoint(val host: String, val port: Int) {
 sealed interface TransportEvent {
     data object Open : TransportEvent
     data class Text(val text: String) : TransportEvent
+
+    class Binary(val bytes: ByteArray) : TransportEvent
     data class Closed(val reason: String?) : TransportEvent
 }
 
@@ -18,6 +20,8 @@ interface Transport {
     /** Hot stream of events; completes after [TransportEvent.Closed]. */
     val events: Flow<TransportEvent>
     fun send(text: String): Boolean
+
+    fun sendBinary(bytes: ByteArray): Boolean
     fun close()
 }
 

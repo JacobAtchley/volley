@@ -71,6 +71,35 @@ at most every 30 s (a charging change is sent immediately).
 
 Liveness uses WebSocket ping/pong frames, not envelopes.
 
+## Files
+
+Paths are relative to the phone's shared-storage root, `/`-separated, with no leading `/`. The phone rejects
+anything that resolves outside the root (`..`, absolute paths, symlinks) and never lists `Android/data` or
+`Android/obb`.
+
+| type             | dir          | body |
+|------------------|--------------|------|
+| `fs.status`      | phone → mac  | `allFilesAccess` (sent after auth and when it changes) |
+| `fs.list`        | mac → phone  | `requestId`, `path`, `showHidden` |
+| `fs.listing`     | phone → mac  | `requestId`, `path`, `entries` (`name`, `isDir`, `size`, `modified` epoch ms, `mime?`), `error?` |
+| `fs.thumb`       | mac → phone  | `requestId`, `path`, `maxPx` |
+| `fs.thumbData`   | phone → mac  | `requestId`, `jpegBase64?`, `error?` |
+| `fs.delete`      | mac → phone  | `requestId`, `paths` (recursive) |
+| `fs.deleted`     | phone → mac  | `requestId`, `failed` (`path`, `error`) |
+| `fs.download`    | mac → phone  | `transferId`, `path` |
+| `fs.begin`       | phone → mac  | `transferId`, `size`, `name` |
+| `fs.upload`      | mac → phone  | `transferId`, `dir`, `name`, `size` |
+| `fs.uploadReady` | phone → mac  | `transferId`, `finalName` (Android-style `name (1).ext` on a clash) |
+| `file.ack`       | receiver → sender | `transferId`, `received` (chunks so far, cumulative) |
+| `fs.end`         | sender → receiver | `transferId`, `sha256` (lowercase hex of the whole file) |
+| `fs.done`        | receiver → sender | `transferId`, `ok`, `error?` (also sent by the phone when a download can't start) |
+| `fs.cancel`      | either       | `transferId`; the receiver deletes its partial file |
+
+**Chunks** travel as binary WebSocket frames on the same connection: bytes 0–15 are the transfer id (UUID,
+big-endian), the rest is up to 262 144 bytes of file data, in order. The sender keeps at most 8 chunks
+unacknowledged, so control messages (texts, notifications) interleave with a large transfer. The Mac runs one
+transfer at a time. A disconnect fails the transfer; nothing resumes.
+
 ## Security (v1 limitations)
 
 - The token is 32 random bytes (base64url), issued once at pairing. The Mac stores only its SHA-256 hash (in its sandboxed preferences) and compares hashes in constant time; builds before this kept the token in the Keychain and migrate it on launch.

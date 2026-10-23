@@ -9,6 +9,8 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.ByteString
+import okio.ByteString.Companion.toByteString
 
 /** WebSocket over the local network. One instance per connection attempt. */
 class LanTransport(client: OkHttpClient, endpoint: Endpoint) : Transport {
@@ -25,6 +27,10 @@ class LanTransport(client: OkHttpClient, endpoint: Endpoint) : Transport {
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 channel.trySend(TransportEvent.Text(text))
+            }
+
+            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                channel.trySend(TransportEvent.Binary(bytes.toByteArray()))
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -44,6 +50,8 @@ class LanTransport(client: OkHttpClient, endpoint: Endpoint) : Transport {
     }
 
     override fun send(text: String): Boolean = socket.send(text)
+
+    override fun sendBinary(bytes: ByteArray): Boolean = socket.send(bytes.toByteString())
 
     override fun close() {
         if (!socket.close(1000, null)) socket.cancel()

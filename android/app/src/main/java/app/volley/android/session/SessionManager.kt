@@ -65,6 +65,9 @@ class SessionManager(
     @Volatile private var authed = false
     private var loop: Job? = null
 
+    /** Binary frames (file chunks) from the Mac; only delivered while authenticated. */
+    @Volatile var onBinary: ((ByteArray) -> Unit)? = null
+
     fun on(type: String, handler: MessageHandler) {
         handlers[type] = handler
     }
@@ -127,6 +130,12 @@ class SessionManager(
         return false
     }
 
+    /** Sends a binary frame. False when not connected or the socket's queue is full. */
+    fun sendBinary(bytes: ByteArray): Boolean {
+        val t = active ?: return false
+        return authed && t.sendBinary(bytes)
+    }
+
     private suspend fun runLoop() {
         var backoff = MIN_BACKOFF_MS
         while (currentCoroutineContext().isActive) {
@@ -184,6 +193,7 @@ class SessionManager(
                             else -> if (authed) handlers[env.type]?.handle(env)
                         }
                     }
+                    is TransportEvent.Binary -> if (authed) onBinary?.invoke(event.bytes)
                     is TransportEvent.Closed -> Unit
                 }
             }

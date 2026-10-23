@@ -18,7 +18,7 @@ final class NotificationSessionTests: XCTestCase {
         trust.save(PairedDevice(id: "d1", name: "Pixel"), token: "t1")
         store = GRDBMessageStore.inMemory()
         session = PhoneSession(identity: MacIdentity(id: "mac", name: "Mac"), transport: transport, trust: trust,
-                               notifier: notifier, store: store, defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                               notifier: notifier, store: store, defaults: scratchDefaults(),
                                now: { [unowned self] in clock = clock.addingTimeInterval(1); return clock })
     }
 

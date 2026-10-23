@@ -45,14 +45,18 @@ cd mac && xcodegen && open Volley.xcodeproj
 Run it, then click the arc icon in the menu bar and choose **Pair a phone**. Allow notifications and local network access when macOS asks.
 Choose **Open Volley** for the messages window: your phone's battery, charging, cell and Wi-Fi status,
 today's text conversations, and a chat view to reply. Messages are kept on the Mac in
-`~/Library/Containers/app.volley.mac/Data/Library/Application Support/Volley/volley.sqlite`.
+`~/Library/Application Support/Volley/volley.sqlite`.
 The **Notifications** area keeps every notification the phone mirrors, marks what's new since you last
 looked, and has fuzzy search. Use **Mirrored Apps…** (or right-click → Don't Mirror) to stop mirroring apps
 that already notify you on the Mac, like Slack. The menu bar shows how many are new.
+The **Files** area shows the phone's storage next to a Mac folder: drag between the two panes (or to Finder)
+to copy, double-click to open in the Mac's default app, right-click to delete on the phone. List or Icons
+view and the sort order are remembered per folder; camera folders open newest first.
 
 **Android**
 Open `android/` in Android Studio and run on a device on the same Wi-Fi, or run `./gradlew installDebug`.
-In the app: grant **Text messages**, **Contacts** and **Notification access**, pick your Mac and enter the code.
+In the app: grant **Text messages**, **Contacts**, **Notification access** and (for Files) **All files access**,
+pick your Mac and enter the code.
 **Send test notification** posts one on demand so you can check mirroring end to end.
 
 On Android 13+, a sideloaded app needs one extra step before you can grant Notification access:
@@ -68,3 +72,6 @@ go to App info → ⋮ → **Allow restricted settings**.
   disconnected can't be recovered.
 - Only text SMS are mirrored; MMS (pictures, group chats) isn't yet. History starts from today when first synced.
 - Only one phone is connected at a time.
+- Files can't reach other apps' private storage (`Android/data`, `Android/obb`); only shared storage.
+  Transfers don't resume after a disconnect, and folders copy to Finder via **Download to…** rather than drag.
+- The Mac app isn't sandboxed (the Files pane browses any folder you open).

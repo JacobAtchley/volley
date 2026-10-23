@@ -29,6 +29,21 @@ object MsgType {
     const val NOTIFICATION_FILTER = "notification.filter"
     const val NOTIFICATION_SYNC = "notification.sync"
     const val NOTIFICATION_BATCH = "notification.batch"
+    const val FS_LIST = "fs.list"
+    const val FS_LISTING = "fs.listing"
+    const val FS_THUMB = "fs.thumb"
+    const val FS_THUMB_DATA = "fs.thumbData"
+    const val FS_DOWNLOAD = "fs.download"
+    const val FS_UPLOAD = "fs.upload"
+    const val FS_UPLOAD_READY = "fs.uploadReady"
+    const val FS_BEGIN = "fs.begin"
+    const val FILE_ACK = "file.ack"
+    const val FS_END = "fs.end"
+    const val FS_DONE = "fs.done"
+    const val FS_CANCEL = "fs.cancel"
+    const val FS_DELETE = "fs.delete"
+    const val FS_DELETED = "fs.deleted"
+    const val FS_STATUS = "fs.status"
 }
 
 @Serializable data class PairRequest(val deviceId: String, val deviceName: String, val code: String)
@@ -94,6 +109,49 @@ data class DeviceStatus(
     val wifiLevel: Int? = null,
     val wifiConnected: Boolean,
 )
+
+@Serializable data class FsList(val requestId: String, val path: String, val showHidden: Boolean = false)
+
+@Serializable
+data class FsEntry(val name: String, val isDir: Boolean, val size: Long, val modified: Long, val mime: String? = null)
+
+@Serializable
+data class FsListing(
+    val requestId: String,
+    val path: String,
+    val entries: List<FsEntry> = emptyList(),
+    val error: String? = null,
+    /** Large folders arrive in pages; the last page has `done = true`. */
+    val done: Boolean = true,
+)
+
+@Serializable data class FsThumb(val requestId: String, val path: String, val maxPx: Int = 256)
+
+@Serializable data class FsThumbData(val requestId: String, val jpegBase64: String? = null, val error: String? = null)
+
+@Serializable data class FsDownload(val transferId: String, val path: String)
+
+@Serializable data class FsUpload(val transferId: String, val dir: String, val name: String, val size: Long)
+
+@Serializable data class FsUploadReady(val transferId: String, val finalName: String)
+
+@Serializable data class FsBegin(val transferId: String, val size: Long, val name: String)
+
+@Serializable data class FileAck(val transferId: String, val received: Int)
+
+@Serializable data class FsEnd(val transferId: String, val sha256: String)
+
+@Serializable data class FsDone(val transferId: String, val ok: Boolean, val error: String? = null)
+
+@Serializable data class FsCancel(val transferId: String)
+
+@Serializable data class FsDelete(val requestId: String, val paths: List<String>)
+
+@Serializable data class FsDeleteFailure(val path: String, val error: String)
+
+@Serializable data class FsDeleted(val requestId: String, val failed: List<FsDeleteFailure> = emptyList())
+
+@Serializable data class FsStatus(val allFilesAccess: Boolean)
 
 object Codec {
     val json = Json {
