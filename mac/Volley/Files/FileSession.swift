@@ -77,6 +77,7 @@ final class FileSession {
     }
 
     private static let viewModesKey = "filesViewModes"
+    private static let sortKey = "filesSortChoices"
     private static let thumbPx = 256
     private static let maxThumbsInFlight = 12
 
@@ -148,6 +149,19 @@ final class FileSession {
     func viewMode(for folder: String) -> FilesViewMode {
         let modes = defaults.dictionary(forKey: Self.viewModesKey) as? [String: String] ?? [:]
         return modes[folder].flatMap(FilesViewMode.init(rawValue:)) ?? .list
+    }
+
+    /// Remembered per folder. Camera-roll folders (DCIM…) default to newest first, everything else to name.
+    func sortChoice(for folder: String) -> SortChoice {
+        let saved = defaults.dictionary(forKey: Self.sortKey) as? [String: String] ?? [:]
+        if let raw = saved[folder], let choice = SortChoice(raw: raw) { return choice }
+        return folder == "DCIM" || folder.hasPrefix("DCIM/") ? .newestFirst : .byName
+    }
+
+    func setSortChoice(_ choice: SortChoice, for folder: String) {
+        var saved = defaults.dictionary(forKey: Self.sortKey) as? [String: String] ?? [:]
+        saved[folder] = choice.raw
+        defaults.set(saved, forKey: Self.sortKey)
     }
 
     func setViewMode(_ mode: FilesViewMode, for folder: String) {

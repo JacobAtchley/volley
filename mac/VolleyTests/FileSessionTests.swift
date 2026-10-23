@@ -296,4 +296,33 @@ final class FileSessionTests: XCTestCase {
         XCTAssertEqual(finished.map(\.0), ["a.bin"])
         XCTAssertEqual(finished.first?.1?.lastPathComponent, "a.bin")
     }
+
+    func testSortDefaultsToNewestFirstInDCIM() {
+        XCTAssertEqual(files.sortChoice(for: "DCIM/Camera"), SortChoice(key: .date, ascending: false))
+        XCTAssertEqual(files.sortChoice(for: "DCIM"), SortChoice(key: .date, ascending: false))
+        XCTAssertEqual(files.sortChoice(for: "Download"), SortChoice(key: .name, ascending: true))
+    }
+
+    func testSortRememberedPerFolder() {
+        files.setSortChoice(SortChoice(key: .size, ascending: false), for: "Download")
+        XCTAssertEqual(files.sortChoice(for: "Download"), SortChoice(key: .size, ascending: false))
+        XCTAssertEqual(files.sortChoice(for: "Music"), SortChoice(key: .name, ascending: true))
+    }
+
+    func testSortEntriesKeepsFoldersFirst() {
+        let items = [
+            FsEntry(name: "b.jpg", isDir: false, size: 1, modified: 300, mime: nil),
+            FsEntry(name: "a.jpg", isDir: false, size: 3, modified: 100, mime: nil),
+            FsEntry(name: "Zdir", isDir: true, size: 0, modified: 50, mime: nil),
+            FsEntry(name: "c.jpg", isDir: false, size: 2, modified: 200, mime: nil)
+        ]
+        XCTAssertEqual(sortEntries(items, by: SortChoice(key: .date, ascending: false)).map(\.name),
+                       ["Zdir", "b.jpg", "c.jpg", "a.jpg"])
+        XCTAssertEqual(sortEntries(items, by: SortChoice(key: .date, ascending: true)).map(\.name),
+                       ["Zdir", "a.jpg", "c.jpg", "b.jpg"])
+        XCTAssertEqual(sortEntries(items, by: SortChoice(key: .size, ascending: false)).map(\.name),
+                       ["Zdir", "a.jpg", "c.jpg", "b.jpg"])
+        XCTAssertEqual(sortEntries(items, by: SortChoice(key: .name, ascending: true)).map(\.name),
+                       ["Zdir", "a.jpg", "b.jpg", "c.jpg"])
+    }
 }

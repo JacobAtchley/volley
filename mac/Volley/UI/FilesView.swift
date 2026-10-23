@@ -56,6 +56,7 @@ private struct FileBrowser: View {
     @State private var selection = Set<FsEntry.ID>()
     @State private var sorted: [FsEntry] = []
     @State private var sortOrder = [KeyPathComparator(\FsEntry.name, comparator: .localizedStandard)]
+    @State private var sortChoice = SortChoice.byName
     @State private var confirmingDelete: [FsEntry] = []
     @State private var deleteErrors: [FsDeleteFailure] = []
     @State private var dropTargeted = false
@@ -65,9 +66,38 @@ private struct FileBrowser: View {
     /// Sorted once per listing page or sort change; sorting 5,000 entries on every render (e.g. each
     /// thumbnail arriving) made big folders crawl.
     private func resort() {
-        let dirs = files.entries.filter(\.isDir).sorted(using: sortOrder)
-        let rest = files.entries.filter { !$0.isDir }.sorted(using: sortOrder)
-        sorted = dirs + rest
+        sorted = sortEntries(files.entries, by: sortChoice)
+    }
+
+    /// The folder's saved sort, mirrored into the table's column headers.
+    private func loadSort() {
+        sortChoice = files.sortChoice(for: files.path)
+        sortOrder = [Self.comparator(for: sortChoice)]
+        resort()
+    }
+
+    private func choose(_ choice: SortChoice) {
+        guard choice != sortChoice else { return }
+        sortChoice = choice
+        files.setSortChoice(choice, for: files.path)
+        sortOrder = [Self.comparator(for: choice)]
+        resort()
+    }
+
+    /// A column header was clicked.
+    private func tableSortChanged() {
+        guard let first = sortOrder.first else { return }
+        let key: SortKey = first.keyPath == \FsEntry.size ? .size : first.keyPath == \FsEntry.modified ? .date : .name
+        choose(SortChoice(key: key, ascending: first.order == .forward))
+    }
+
+    private static func comparator(for choice: SortChoice) -> KeyPathComparator<FsEntry> {
+        let order: SortOrder = choice.ascending ? .forward : .reverse
+        switch choice.key {
+        case .name: return KeyPathComparator(\FsEntry.name, comparator: .localizedStandard, order: order)
+        case .size: return KeyPathComparator(\FsEntry.size, order: order)
+        case .date: return KeyPathComparator(\FsEntry.modified, order: order)
+        }
     }
 
     var body: some View {
@@ -112,8 +142,9 @@ private struct FileBrowser: View {
         }
         .onChange(of: files.path) { selection = [] }
         .onChange(of: files.entries) { resort() }
-        .onChange(of: sortOrder) { resort() }
-        .onAppear { resort() }
+        .onChange(of: files.path) { loadSort() }
+        .onChange(of: sortOrder) { tableSortChanged() }
+        .onAppear { loadSort() }
     }
 
     // MARK: List
@@ -192,6 +223,7 @@ private struct FileBrowser: View {
                 Image(systemName: "folder")
             }
             .menuStyle(.borderlessButton).fixedSize().help("Places")
+            SortMenu(choice: sortChoice, onChange: choose)
             Picker("View", selection: Binding(get: { mode }, set: { files.setViewMode($0, for: files.path) })) {
                 Image(systemName: "list.bullet").tag(FilesViewMode.list).help("List")
                 Image(systemName: "square.grid.2x2").tag(FilesViewMode.icons).help("Icons")
@@ -439,122 +471,5 @@ struct TransfersView: View {
         case let .failed(message): Text(message).foregroundStyle(.red)
         case .cancelled: Text("Cancelled")
         }
-    }
-}
-
-/// A Mac folder: browse, open, drag files to the Phone pane, drop phone files here to download.
-private struct MacPane: View {
-    let mac: MacFolder
-    let files: FileSession
-    @State private var selection = Set<MacEntry.ID>()
-    @State private var dropTargeted = false
-
-    var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            Group {
-                if let error = mac.error {
-                    Placeholder(text: error)
-                } else if mac.entries.isEmpty {
-                    Placeholder(text: "Empty folder")
-                } else {
-                    table
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .overlay {
-                if dropTargeted {
-                    RoundedRectangle(cornerRadius: 10).stroke(Color.coral, style: StrokeStyle(lineWidth: 3, dash: [6]))
-                        .padding(6)
-                }
-            }
-            .onDrop(of: [.volleyPhonePath], isTargeted: $dropTargeted) { providers in
-                downloadDropped(providers, into: mac.url)
-            }
-        }
-        .onChange(of: mac.url) { selection = [] }
-    }
-
-    private var header: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "laptopcomputer").foregroundStyle(Color.coral)
-            Button { mac.back() } label: { Image(systemName: "chevron.left") }
-                .buttonStyle(.borderless).disabled(!mac.canGoBack).help("Back")
-            Button { mac.forward() } label: { Image(systemName: "chevron.right") }
-                .buttonStyle(.borderless).disabled(!mac.canGoForward).help("Forward")
-            Text(mac.url.lastPathComponent).fontWeight(.semibold).lineLimit(1).truncationMode(.middle)
-                .help(mac.url.path)
-            Spacer(minLength: 4)
-            Menu {
-                ForEach(MacFolder.places, id: \.1) { name, url in Button(name) { mac.open(url) } }
-                Divider()
-                Button("Up One Level") { mac.open(mac.url.deletingLastPathComponent()) }
-            } label: {
-                Image(systemName: "folder")
-            }
-            .menuStyle(.borderlessButton).fixedSize().help("Places")
-            Button { mac.refresh() } label: { Image(systemName: "arrow.clockwise") }
-                .buttonStyle(.borderless).help("Refresh")
-        }
-        .padding(.horizontal, 10).padding(.vertical, 6)
-    }
-
-    private var table: some View {
-        Table(of: MacEntry.self, selection: $selection) {
-            TableColumn("Name") { e in
-                Label {
-                    Text(e.name)
-                } icon: {
-                    Image(nsImage: NSWorkspace.shared.icon(forFile: e.url.path))
-                        .resizable().frame(width: 16, height: 16)
-                }
-            }
-            TableColumn("Size") { e in
-                Text(e.isDir ? "—" : ByteCountFormatter.string(fromByteCount: e.size, countStyle: .file))
-                    .foregroundStyle(.secondary)
-            }
-            .width(min: 60, ideal: 80)
-            TableColumn("Modified") { e in Text(e.modified, format: .dateTime).foregroundStyle(.secondary) }
-                .width(min: 120, ideal: 150)
-        } rows: {
-            ForEach(mac.entries) { e in
-                TableRow(e).itemProvider { NSItemProvider(object: e.url as NSURL) }
-            }
-        }
-        .contextMenu(forSelectionType: MacEntry.ID.self) { ids in
-            if !ids.isEmpty {
-                Button("Open") { open(ids) }
-                Button("Copy to “\(phoneFolderName)” on Phone") {
-                    files.upload(Array(ids), into: files.path)
-                }
-                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(Array(ids)) }
-            }
-        } primaryAction: { ids in
-            open(ids)
-        }
-    }
-
-    private var phoneFolderName: String {
-        files.path.isEmpty ? "Phone" : (files.path as NSString).lastPathComponent
-    }
-
-    private func open(_ ids: Set<URL>) {
-        let chosen = mac.entries.filter { ids.contains($0.url) }
-        if chosen.count == 1, let folder = chosen.first, folder.isDir { return mac.open(folder.url) }
-        chosen.filter { !$0.isDir }.forEach { NSWorkspace.shared.open($0.url) }
-    }
-
-    /// Phone rows dropped here download straight into this folder.
-    private func downloadDropped(_ providers: [NSItemProvider], into dir: URL) -> Bool {
-        let phone = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.volleyPhonePath.identifier) }
-        guard !phone.isEmpty else { return false }
-        for provider in phone {
-            provider.loadDataRepresentation(forTypeIdentifier: UTType.volleyPhonePath.identifier) { data, _ in
-                guard let data, let path = String(data: data, encoding: .utf8) else { return }
-                Task { @MainActor in files.download([path], to: dir) }
-            }
-        }
-        return true
     }
 }

@@ -20,12 +20,20 @@ final class MacFolder {
     private(set) var error: String?
     private(set) var canGoBack = false
     private(set) var canGoForward = false
+    /// One setting for the whole pane, remembered.
+    var sort: SortChoice {
+        didSet {
+            defaults.set(sort.raw, forKey: Self.sortKey)
+            entries = sortMacEntries(entries, by: sort)
+        }
+    }
 
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var backStack: [URL] = []
     @ObservationIgnored private var forwardStack: [URL] = []
 
     private static let lastFolderKey = "macPaneFolder"
+    private static let sortKey = "macPaneSort"
 
     static var places: [(String, URL)] {
         let fm = FileManager.default
@@ -46,6 +54,7 @@ final class MacFolder {
             return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue ? url : nil
         }
         url = start ?? remembered ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        sort = defaults.string(forKey: Self.sortKey).flatMap(SortChoice.init(raw:)) ?? .byName
         refresh()
     }
 
@@ -73,15 +82,13 @@ final class MacFolder {
         do {
             let urls = try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: keys,
                                                                     options: [.skipsHiddenFiles])
-            entries = urls.map { item in
+            let unsorted = urls.map { item in
                 let values = try? item.resourceValues(forKeys: Set(keys))
                 return MacEntry(name: item.lastPathComponent, url: item, isDir: values?.isDirectory ?? false,
                                 size: Int64(values?.fileSize ?? 0),
                                 modified: values?.contentModificationDate ?? .distantPast)
             }
-            .sorted { a, b in
-                a.isDir != b.isDir ? a.isDir : a.name.localizedStandardCompare(b.name) == .orderedAscending
-            }
+            entries = sortMacEntries(unsorted, by: sort)
             error = nil
         } catch {
             entries = []

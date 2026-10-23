@@ -53,4 +53,14 @@ final class MacFolderTests: XCTestCase {
         folder.refresh()
         XCTAssertTrue(folder.entries.contains { $0.name == "new.txt" })
     }
+
+    func testSortByDateNewestFirstIsRemembered() throws {
+        let old = root.appendingPathComponent("A.txt")
+        let longAgo: [FileAttributeKey: Any] = [.modificationDate: Date(timeIntervalSince1970: 1)]
+        try FileManager.default.setAttributes(longAgo, ofItemAtPath: old.path)
+        let folder = MacFolder(defaults: defaults, start: root)
+        folder.sort = SortChoice(key: .date, ascending: false)
+        XCTAssertEqual(folder.entries.map(\.name), ["zdir", "b.txt", "A.txt"])
+        XCTAssertEqual(MacFolder(defaults: defaults, start: root).sort, SortChoice(key: .date, ascending: false))
+    }
 }
