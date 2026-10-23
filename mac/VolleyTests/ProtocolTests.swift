@@ -36,7 +36,8 @@ final class ProtocolTests: XCTestCase {
     }
 
     func testEncodesNotificationFilter() throws {
-        let data = try XCTUnwrap(Codec.encode(MsgType.notificationFilter, NotificationFilter(excludedPackages: ["com.slack"])))
+        let filter = NotificationFilter(excludedPackages: ["com.slack"])
+        let data = try XCTUnwrap(Codec.encode(MsgType.notificationFilter, filter))
         let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         XCTAssertEqual(obj["type"] as? String, "notification.filter")
         XCTAssertEqual((obj["body"] as? [String: Any])?["excludedPackages"] as? [String], ["com.slack"])

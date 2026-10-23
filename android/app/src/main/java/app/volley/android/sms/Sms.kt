@@ -3,9 +3,9 @@ package app.volley.android.sms
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 import android.provider.Telephony
 import android.telephony.SmsManager
+import android.util.Log
 import app.volley.android.graph
 import app.volley.android.protocol.Codec
 import app.volley.android.protocol.MsgType
@@ -26,16 +26,16 @@ class SystemSmsSender(context: Context) : SmsSender {
 
     override fun send(address: String, body: String): Result<Unit> = runCatching {
         val parts = sms.divideMessage(body)
-        if (parts.size == 1) sms.sendTextMessage(address, null, body, null, null)
-        else sms.sendMultipartTextMessage(address, null, parts, null, null)
+        if (parts.size == 1) {
+            sms.sendTextMessage(address, null, body, null, null)
+        } else {
+            sms.sendMultipartTextMessage(address, null, parts, null, null)
+        }
     }
 }
 
 /** Handles `sms.send` from the Mac and replies with `sms.sent`. */
-class SmsSendHandler(
-    private val sender: SmsSender,
-    private val session: SessionManager,
-) : MessageHandler {
+class SmsSendHandler(private val sender: SmsSender, private val session: SessionManager) : MessageHandler {
     override fun handle(envelope: app.volley.android.protocol.Envelope) {
         val req = envelope.bodyAs<SmsSend>() ?: return
         val result = sender.send(req.address, req.body)

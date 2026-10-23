@@ -47,11 +47,7 @@ fun interface ContactNames {
  * Answers the Mac's `sms.sync` and then streams changes as `sms.batch` frames.
  * Nothing is sent on change until the Mac has asked for a sync, so we never guess its cursor.
  */
-class SmsSyncer(
-    private val source: SmsSource,
-    private val names: ContactNames,
-    private val send: (String) -> Unit,
-) {
+class SmsSyncer(private val source: SmsSource, private val names: ContactNames, private val send: (String) -> Unit) {
     private var cursor: Long? = null
     private var floor = 0L
     private var pendingIds = emptySet<Long>()
@@ -107,15 +103,26 @@ class ContentResolverSmsSource(private val resolver: ContentResolver) : SmsSourc
     override fun since(sinceId: Long, sinceTime: Long) =
         query("${Sms._ID} > ? AND ${Sms.DATE} >= ? AND $TYPES", arrayOf(sinceId.toString(), sinceTime.toString()))
 
-    override fun byIds(ids: Collection<Long>): List<SmsRow> =
-        if (ids.isEmpty()) emptyList()
-        else query("${Sms._ID} IN (${ids.joinToString { "?" }}) AND $TYPES", ids.map { it.toString() }.toTypedArray())
+    override fun byIds(ids: Collection<Long>): List<SmsRow> = if (ids.isEmpty()) {
+        emptyList()
+    } else {
+        query("${Sms._ID} IN (${ids.joinToString { "?" }}) AND $TYPES", ids.map { it.toString() }.toTypedArray())
+    }
 
     private fun query(selection: String, args: Array<String>): List<SmsRow> = try {
         resolver.query(Sms.CONTENT_URI, COLUMNS, selection, args, "${Sms._ID} ASC")?.use { c ->
             buildList {
                 while (c.moveToNext()) {
-                    add(SmsRow(c.getLong(0), c.getLong(1), c.getString(2).orEmpty(), c.getString(3).orEmpty(), c.getLong(4), c.getInt(5)))
+                    add(
+                        SmsRow(
+                            c.getLong(0),
+                            c.getLong(1),
+                            c.getString(2).orEmpty(),
+                            c.getString(3).orEmpty(),
+                            c.getLong(4),
+                            c.getInt(5),
+                        ),
+                    )
                 }
             }
         }.orEmpty()

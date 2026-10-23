@@ -146,7 +146,8 @@ struct VolleyMark: View {
             ctx.stroke(arc, with: .color(.cocoa), style: StrokeStyle(lineWidth: 5 * s, lineCap: .round))
             for x in [13.0, 51.0] {
                 let r = 5 * s
-                ctx.fill(Path(ellipseIn: CGRect(x: x * s - r, y: 45 * s - r, width: 2 * r, height: 2 * r)), with: .color(.cocoa))
+                let dot = CGRect(x: x * s - r, y: 45 * s - r, width: 2 * r, height: 2 * r)
+                ctx.fill(Path(ellipseIn: dot), with: .color(.cocoa))
             }
         }
         .accessibilityHidden(true)

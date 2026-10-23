@@ -14,7 +14,8 @@ final class NotificationStoreTests: XCTestCase {
 
     func testChangedTextAddsRow() {
         store.upsertNotification(posted(text: "Ana: hi"), deviceId: "d1", receivedAt: t0)
-        store.upsertNotification(posted(text: "Ana: hi\nAna: deploy is green", at: 2_000), deviceId: "d1", receivedAt: t0)
+        let updated = posted(text: "Ana: hi\nAna: deploy is green", at: 2_000)
+        store.upsertNotification(updated, deviceId: "d1", receivedAt: t0)
         XCTAssertEqual(store.notifications(deviceId: "d1").map(\.text), ["Ana: hi\nAna: deploy is green", "Ana: hi"])
     }
 
@@ -49,7 +50,8 @@ final class NotificationStoreTests: XCTestCase {
         store.upsertNotification(posted("a"), deviceId: "d1", receivedAt: t0)
         store.upsertNotification(posted("b"), deviceId: "d1", receivedAt: t0)
         store.clearNotifications(deviceId: "d1", notIn: ["b"])
-        XCTAssertEqual(store.notifications(deviceId: "d1").map { "\($0.key)=\($0.cleared)" }.sorted(), ["a=true", "b=false"])
+        let states = store.notifications(deviceId: "d1").map { "\($0.key)=\($0.cleared)" }.sorted()
+        XCTAssertEqual(states, ["a=true", "b=false"])
     }
 
     func testLastViewedRoundTrip() {
@@ -90,7 +92,8 @@ final class NotificationStoreTests: XCTestCase {
         store.upsertNotification(posted(at: 1_000), deviceId: "d1", receivedAt: t0)
         store.markNotificationCleared(deviceId: "d1", key: "k1")
         store.upsertNotification(posted(at: 1_000), deviceId: "d1", receivedAt: t0)
-        XCTAssertEqual(store.notifications(deviceId: "d1").map(\.cleared), [true], "same post resent by sync stays cleared")
+        XCTAssertEqual(store.notifications(deviceId: "d1").map(\.cleared), [true],
+                       "same post resent by sync stays cleared")
         store.upsertNotification(posted(at: 2_000), deviceId: "d1", receivedAt: t0)
         XCTAssertEqual(store.notifications(deviceId: "d1").map(\.cleared), [false])
     }

@@ -93,7 +93,7 @@ final class GRDBMessageStore: MessageStore {
 
     static func inMemory() -> GRDBMessageStore {
         // An in-memory database can't fail to open or migrate.
-        try! GRDBMessageStore(queue: DatabaseQueue())
+        try! GRDBMessageStore(queue: DatabaseQueue()) // swiftlint:disable:this force_try
     }
 
     private static var migrator: DatabaseMigrator {
@@ -178,8 +178,9 @@ final class GRDBMessageStore: MessageStore {
 
     func pendingPhoneIds(deviceId: String) -> [Int64] {
         read { db in
-            try Int64.fetchAll(db, sql: "SELECT phone_id FROM messages WHERE device_id = ? AND status = 'pending' ORDER BY phone_id",
-                               arguments: [deviceId])
+            try Int64.fetchAll(db, sql: """
+                SELECT phone_id FROM messages WHERE device_id = ? AND status = 'pending' ORDER BY phone_id
+                """, arguments: [deviceId])
         } ?? []
     }
 
@@ -226,7 +227,8 @@ final class GRDBMessageStore: MessageStore {
                 INSERT OR REPLACE INTO device_status
                     (device_id, battery, charging, cell_level, wifi_level, wifi_connected, last_seen)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, arguments: [deviceId, s.battery, s.charging, s.cellLevel, s.wifiLevel, s.wifiConnected, Self.millis(at)])
+                """, arguments: [deviceId, s.battery, s.charging, s.cellLevel, s.wifiLevel, s.wifiConnected,
+                                 Self.millis(at)])
         }
     }
 
@@ -241,7 +243,9 @@ final class GRDBMessageStore: MessageStore {
 
     func status(deviceId: String) -> StoredStatus? {
         read { db in
-            try Row.fetchOne(db, sql: "SELECT * FROM device_status WHERE device_id = ?", arguments: [deviceId]).map { row in
+            let sql = "SELECT * FROM device_status WHERE device_id = ?"
+            let row = try Row.fetchOne(db, sql: sql, arguments: [deviceId])
+            return row.map { row in
                 let battery: Int? = row["battery"]
                 let status = battery.map {
                     DeviceStatus(battery: $0, charging: row["charging"], cellLevel: row["cell_level"],
@@ -272,7 +276,8 @@ final class GRDBMessageStore: MessageStore {
                     -- A newer post of the same text means it's showing on the phone again.
                     cleared = CASE WHEN excluded.posted_at > posted_at THEN 0 ELSE cleared END,
                     -- Only a genuinely newer post is "received" again; a reconnect resend is not new.
-                    received_at = CASE WHEN excluded.posted_at > posted_at THEN excluded.received_at ELSE received_at END,
+                    received_at = CASE WHEN excluded.posted_at > posted_at
+                                       THEN excluded.received_at ELSE received_at END,
                     posted_at = MAX(posted_at, excluded.posted_at)
                 """, arguments: [deviceId, n.key, Self.contentHash(n), n.postedAt, n.pkg, n.appName, n.title, n.text,
                                  Self.millis(receivedAt)])
@@ -303,8 +308,9 @@ final class GRDBMessageStore: MessageStore {
 
     func clearNotifications(deviceId: String, notIn activeKeys: Set<String>) {
         write { db in
-            let keys = try String.fetchAll(db, sql: "SELECT DISTINCT key FROM notifications WHERE device_id = ? AND cleared = 0",
-                                           arguments: [deviceId])
+            let keys = try String.fetchAll(db, sql: """
+                SELECT DISTINCT key FROM notifications WHERE device_id = ? AND cleared = 0
+                """, arguments: [deviceId])
             for key in keys where !activeKeys.contains(key) {
                 try db.execute(sql: "UPDATE notifications SET cleared = 1 WHERE device_id = ? AND key = ?",
                                arguments: [deviceId, key])
@@ -314,7 +320,8 @@ final class GRDBMessageStore: MessageStore {
 
     func lastViewedNotifications(deviceId: String) -> Date? {
         read { db in
-            try Int64.fetchOne(db, sql: "SELECT last_viewed FROM notification_views WHERE device_id = ?", arguments: [deviceId])
+            try Int64.fetchOne(db, sql: "SELECT last_viewed FROM notification_views WHERE device_id = ?",
+                               arguments: [deviceId])
         }.flatMap { $0 }.map(Self.date)
     }
 

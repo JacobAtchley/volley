@@ -23,6 +23,7 @@ class VolleyNotificationListener : NotificationListenerService() {
     private val forwarded = object : LinkedHashMap<String, Int>(64, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Int>) = size > MAX_TRACKED
     }
+
     // Written from the main thread (posts) and the session thread (sync).
     private val appNames = ConcurrentHashMap<String, String>()
 
@@ -34,7 +35,9 @@ class VolleyNotificationListener : NotificationListenerService() {
         session.on(MsgType.NOTIFICATION_SYNC) { env ->
             val req = env.bodyAs<NotificationSync>() ?: return@on
             val active = runCatching { activeNotifications.orEmpty().map(::facts) }.getOrDefault(emptyList())
-            session.send(Codec.encode(MsgType.NOTIFICATION_BATCH, notificationBatch(active, req.sinceTime, rules(), ::appName)))
+            session.send(
+                Codec.encode(MsgType.NOTIFICATION_BATCH, notificationBatch(active, req.sinceTime, rules(), ::appName)),
+            )
         }
         session.start()
     }
@@ -65,7 +68,8 @@ class VolleyNotificationListener : NotificationListenerService() {
         }
     }
 
-    private fun rules() = MirrorRules(packageName, Telephony.Sms.getDefaultSmsPackage(this), graph.excludedPackages.current)
+    private fun rules() =
+        MirrorRules(packageName, Telephony.Sms.getDefaultSmsPackage(this), graph.excludedPackages.current)
 
     private fun facts(sbn: StatusBarNotification): NotificationFacts {
         val n = sbn.notification
@@ -78,8 +82,10 @@ class VolleyNotificationListener : NotificationListenerService() {
             ongoing = sbn.isOngoing,
             groupSummary = n.flags and Notification.FLAG_GROUP_SUMMARY != 0,
             title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty(),
-            text = (extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
-                ?: extras.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty(),
+            text = (
+                extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
+                    ?: extras.getCharSequence(Notification.EXTRA_TEXT)
+                )?.toString().orEmpty(),
             postTime = sbn.postTime,
         )
     }

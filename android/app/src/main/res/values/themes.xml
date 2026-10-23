@@ -1,7 +1,6 @@
 <resources>
     <color name="volley_coral">#FF9E8F</color>
     <color name="volley_shell">#FFF6F2</color>
-    <color name="volley_cocoa">#2A1F1D</color>
 
     <style name="Theme.Volley" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/volley_shell</item>

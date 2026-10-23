@@ -61,11 +61,16 @@ class SessionManager(
     private val pending = ArrayDeque<String>()
 
     @Volatile private var active: Transport? = null
+
     @Volatile private var authed = false
     private var loop: Job? = null
 
-    fun on(type: String, handler: MessageHandler) { handlers[type] = handler }
-    fun off(type: String) { handlers.remove(type) }
+    fun on(type: String, handler: MessageHandler) {
+        handlers[type] = handler
+    }
+    fun off(type: String) {
+        handlers.remove(type)
+    }
 
     @Synchronized
     fun start() {
@@ -113,9 +118,11 @@ class SessionManager(
     fun send(frame: String, bufferIfOffline: Boolean = false): Boolean {
         val t = active
         if (t != null && authed && t.send(frame)) return true
-        if (bufferIfOffline) synchronized(pending) {
-            if (pending.size >= MAX_PENDING) pending.removeFirst()
-            pending.addLast(frame)
+        if (bufferIfOffline) {
+            synchronized(pending) {
+                if (pending.size >= MAX_PENDING) pending.removeFirst()
+                pending.addLast(frame)
+            }
         }
         return false
     }
@@ -159,7 +166,10 @@ class SessionManager(
                     is TransportEvent.Text -> {
                         val env = Codec.decode(event.text) ?: return@collect
                         when (env.type) {
-                            MsgType.HELLO_OK -> { ok = true; onAuthed(transport, mac.name) }
+                            MsgType.HELLO_OK -> {
+                                ok = true
+                                onAuthed(transport, mac.name)
+                            }
                             MsgType.PAIR_RESULT -> {
                                 val r = env.bodyAs<PairResult>()
                                 if (r?.ok == true && r.token != null) {

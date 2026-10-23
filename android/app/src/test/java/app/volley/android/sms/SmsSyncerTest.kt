@@ -17,7 +17,10 @@ class SmsSyncerTest {
 
     private val source = FakeSource()
     private val lookups = mutableListOf<String>()
-    private val names = ContactNames { lookups += it; if (it == "+1555") "Ana" else null }
+    private val names = ContactNames {
+        lookups += it
+        if (it == "+1555") "Ana" else null
+    }
     private val frames = mutableListOf<String>()
     private val syncer = SmsSyncer(source, names) { frames += it }
     private val batches get() = frames.map { Codec.decode(it)!!.bodyAs<SmsBatch>()!! }
@@ -27,8 +30,13 @@ class SmsSyncerTest {
 
     @Test
     fun toRecord_mapsTypes() {
-        val expected = mapOf(1 to ("received" to false), 2 to ("sent" to true), 4 to ("pending" to true),
-            5 to ("failed" to true), 6 to ("pending" to true))
+        val expected = mapOf(
+            1 to ("received" to false),
+            2 to ("sent" to true),
+            4 to ("pending" to true),
+            5 to ("failed" to true),
+            6 to ("pending" to true),
+        )
         expected.forEach { (type, want) ->
             val r = row(1, type).toRecord("Ana")!!
             assertEquals(want, r.status to r.outgoing)

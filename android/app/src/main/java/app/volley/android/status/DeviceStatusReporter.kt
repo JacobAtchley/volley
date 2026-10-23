@@ -12,7 +12,6 @@ import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.SystemClock
-import android.telephony.PhoneStateListener
 import android.telephony.SignalStrength
 import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
@@ -157,6 +156,8 @@ class DeviceStatusReporter(
 
     private fun onSignal(strength: SignalStrength) = update { cellLevel = strength.level }
 
+    // PhoneStateListener is the only option on API 29–30; TelephonyCallback replaces it from 31.
+    @Suppress("DEPRECATION")
     private fun registerCell() {
         val tm = telephony ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -164,29 +165,35 @@ class DeviceStatusReporter(
             tm.registerTelephonyCallback(callbackExecutor, cb)
             cellListener = cb
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            @Suppress("DEPRECATION")
-            val listener = object : PhoneStateListener(callbackExecutor) {
+            val listener = object : android.telephony.PhoneStateListener(callbackExecutor) {
                 @Deprecated("Deprecated in Java")
                 override fun onSignalStrengthsChanged(strength: SignalStrength) = onSignal(strength)
             }
-            @Suppress("DEPRECATION")
-            tm.listen(listener, PhoneStateListener.LISTEN_SIGNAL_STRENGTHS)
+            tm.listen(listener, android.telephony.PhoneStateListener.LISTEN_SIGNAL_STRENGTHS)
             cellListener = listener
         }
     }
 
+    @Suppress("DEPRECATION")
     private fun unregisterCell() {
         val tm = telephony ?: return
         when (val l = cellListener) {
-            is PhoneStateListener -> @Suppress("DEPRECATION") tm.listen(l, PhoneStateListener.LISTEN_NONE)
+            is android.telephony.PhoneStateListener ->
+                tm.listen(l, android.telephony.PhoneStateListener.LISTEN_NONE)
             null -> Unit
-            else -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) tm.unregisterTelephonyCallback(l as TelephonyCallback)
+            else -> if (Build.VERSION.SDK_INT >=
+                Build.VERSION_CODES.S
+            ) {
+                tm.unregisterTelephonyCallback(l as TelephonyCallback)
+            }
         }
         cellListener = null
     }
 
     @RequiresApi(Build.VERSION_CODES.S)
-    private inner class SignalCallback : TelephonyCallback(), TelephonyCallback.SignalStrengthsListener {
+    private inner class SignalCallback :
+        TelephonyCallback(),
+        TelephonyCallback.SignalStrengthsListener {
         override fun onSignalStrengthsChanged(strength: SignalStrength) = onSignal(strength)
     }
 
@@ -196,10 +203,14 @@ class DeviceStatusReporter(
             caps.signalStrength
         } else {
             @Suppress("DEPRECATION")
-            context.getSystemService(WifiManager::class.java)?.connectionInfo?.rssi ?: NetworkCapabilities.SIGNAL_STRENGTH_UNSPECIFIED
+            context.getSystemService(WifiManager::class.java)?.connectionInfo?.rssi
+                ?: UNKNOWN_RSSI
         }
-        if (rssi == NetworkCapabilities.SIGNAL_STRENGTH_UNSPECIFIED) return null
+        if (rssi == UNKNOWN_RSSI) return null
         @Suppress("DEPRECATION")
         return WifiManager.calculateSignalLevel(rssi, 5)
     }
 }
+
+/** Same value as `NetworkCapabilities.SIGNAL_STRENGTH_UNSPECIFIED`, which only exists from API 29. */
+private const val UNKNOWN_RSSI = Int.MIN_VALUE

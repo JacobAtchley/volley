@@ -36,10 +36,11 @@ final class NotificationSessionTests: XCTestCase {
         connect()
         let types = transport.sent.compactMap { Codec.header($0)?.type }
         XCTAssertEqual(types, [MsgType.helloOk, MsgType.notificationFilter, MsgType.smsSync, MsgType.notificationSync])
-        XCTAssertEqual(transport.sentBodies(MsgType.notificationFilter, as: NotificationFilter.self).map(\.excludedPackages),
-                       [["com.slack"]])
+        let filters = transport.sentBodies(MsgType.notificationFilter, as: NotificationFilter.self)
+        XCTAssertEqual(filters.map(\.excludedPackages), [["com.slack"]])
         let midnight = Int64(Calendar.current.startOfDay(for: Date()).timeIntervalSince1970 * 1000)
-        XCTAssertEqual(transport.sentBodies(MsgType.notificationSync, as: NotificationSync.self).map(\.sinceTime), [midnight])
+        let syncs = transport.sentBodies(MsgType.notificationSync, as: NotificationSync.self)
+        XCTAssertEqual(syncs.map(\.sinceTime), [midnight])
     }
 
     func testLivePostStoresAndBanners() {
@@ -55,7 +56,8 @@ final class NotificationSessionTests: XCTestCase {
         deliver(MsgType.notificationBatch, NotificationBatch(notifications: [posted("a"), posted("b")],
                                                              activeKeys: ["a", "b"], done: true))
         XCTAssertEqual(notifier.shown.map(\.key), ["gone"])
-        XCTAssertEqual(session.notificationHistory.map { "\($0.key)=\($0.cleared)" }.sorted(), ["a=false", "b=false", "gone=true"])
+        let states = session.notificationHistory.map { "\($0.key)=\($0.cleared)" }.sorted()
+        XCTAssertEqual(states, ["a=false", "b=false", "gone=true"])
     }
 
     func testRemovedMarksCleared() {
@@ -126,8 +128,8 @@ final class NotificationSessionTests: XCTestCase {
         session.setExcluded(slack, true)
         XCTAssertTrue(session.notificationHistory.isEmpty)
         XCTAssertEqual(session.excludedApps, [slack])
-        XCTAssertEqual(transport.sentBodies(MsgType.notificationFilter, as: NotificationFilter.self).last?.excludedPackages,
-                       ["com.slack"])
+        let filter = transport.sentBodies(MsgType.notificationFilter, as: NotificationFilter.self).last
+        XCTAssertEqual(filter?.excludedPackages, ["com.slack"])
         session.setExcluded(slack, false)
         XCTAssertEqual(session.notificationHistory.count, 1)
     }
