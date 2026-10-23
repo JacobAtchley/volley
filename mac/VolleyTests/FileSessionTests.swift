@@ -36,7 +36,7 @@ final class FileSessionTests: XCTestCase {
         link = FakeLink()
         dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        files = FileSession(link: link, defaults: UserDefaults(suiteName: UUID().uuidString)!,
+        files = FileSession(link: link, defaults: scratchDefaults(),
                             tempDir: dir.appendingPathComponent("tmp"), open: { [unowned self] in opened.append($0) })
     }
 

@@ -21,7 +21,7 @@ final class TrustStoreTests: XCTestCase {
     private let pixel = PairedDevice(id: "d1", name: "Pixel")
 
     override func setUp() {
-        defaults = UserDefaults(suiteName: UUID().uuidString)
+        defaults = scratchDefaults()
         legacy = FakeLegacy()
         store = HashedTrustStore(defaults: defaults, legacy: legacy)
     }

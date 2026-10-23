@@ -1,5 +1,16 @@
 import Foundation
+import XCTest
 @testable import Volley
+
+extension XCTestCase {
+    /// One shared suite, wiped per test: per-test random suites leave files in ~/Library/Preferences
+    /// (cfprefsd rewrites them after deletion), now that the app isn't sandboxed.
+    func scratchDefaults() -> UserDefaults {
+        let name = "app.volley.tests"
+        UserDefaults().removePersistentDomain(forName: name)
+        return UserDefaults(suiteName: name)!
+    }
+}
 
 final class FakeTransport: PhoneTransport {
     var onEvent: (@MainActor (TransportEvent) -> Void)?

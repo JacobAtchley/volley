@@ -15,7 +15,7 @@ final class PhoneSessionTests: XCTestCase {
         trust = FakeTrust()
         trust.save(PairedDevice(id: "d1", name: "Pixel"), token: "t1")
         store = GRDBMessageStore.inMemory()
-        defaults = UserDefaults(suiteName: UUID().uuidString)
+        defaults = scratchDefaults()
         makeSession()
     }
 

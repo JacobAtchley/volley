@@ -332,7 +332,9 @@ final class FileSession {
                                                           options: [.skipsHiddenFiles]) else { return }
         for case let url as URL in walker {
             guard (try? url.resourceValues(forKeys: Set(keys)).isDirectory) != true else { continue }
-            let relativeDir = url.deletingLastPathComponent().path.dropFirst(folder.path.count)
+            // Compare resolved paths: the enumerator may report /private/var/… for a folder given as /var/….
+            let root = folder.resolvingSymlinksInPath().path
+            let relativeDir = url.deletingLastPathComponent().resolvingSymlinksInPath().path.dropFirst(root.count)
                 .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
             let target = relativeDir.isEmpty ? base : "\(base)/\(relativeDir)"
             enqueue(.upload(local: url, dir: target), name: url.lastPathComponent, size: Self.size(of: url),

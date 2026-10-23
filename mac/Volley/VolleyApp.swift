@@ -18,6 +18,9 @@ struct VolleyApp: App {
 @MainActor
 enum Composition {
     static func makeSession() -> PhoneSession {
+        if let bundleId = Bundle.main.bundleIdentifier, NSClassFromString("XCTestCase") == nil {
+            SandboxMigration.run(bundleId: bundleId)
+        }
         let identity = MacIdentity.load()
         let transport = LanServer(
             serviceName: identity.name,
