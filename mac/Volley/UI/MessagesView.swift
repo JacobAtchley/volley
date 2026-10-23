@@ -5,10 +5,14 @@ struct MessagesView: View {
     let session: PhoneSession
     @State private var selectedNotification: StoredNotification.ID?
 
+    private var areaSelection: Binding<PhoneArea?> {
+        Binding(get: { session.area }, set: { if let area = $0 { session.select(area: area) } })
+    }
+
     var body: some View {
         if let device = session.currentDevice {
             NavigationSplitView {
-                List(selection: Binding(get: { session.area }, set: { if let area = $0 { session.select(area: area) } })) {
+                List(selection: areaSelection) {
                     PhoneCard(device: device, connected: session.isConnected, status: session.deviceStatus)
                         .selectionDisabled()
                     Label("SMS", systemImage: "message").tag(PhoneArea.sms)
@@ -165,7 +169,8 @@ private struct ChatView: View {
                 ScrollView {
                     LazyVStack(spacing: 6) {
                         ForEach(Array(session.openThread.enumerated()), id: \.element.id) { i, item in
-                            if i == 0 || !Calendar.current.isDate(item.date, inSameDayAs: session.openThread[i - 1].date) {
+                            if i == 0 || !Calendar.current.isDate(item.date,
+                                                                  inSameDayAs: session.openThread[i - 1].date) {
                                 Text(item.date, format: .dateTime.weekday(.wide).month().day())
                                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                                     .padding(.top, 10)

@@ -2,7 +2,8 @@ import XCTest
 @testable import Volley
 
 final class FuzzySearchTests: XCTestCase {
-    private func note(_ key: String, app: String = "Mail", title: String = "", text: String = "", at secs: Double = 0) -> StoredNotification {
+    private func note(_ key: String, app: String = "Mail", title: String = "", text: String = "",
+                      at secs: Double = 0) -> StoredNotification {
         StoredNotification(key: key, contentHash: key, pkg: "p.\(app)", appName: app, title: title, text: text,
                            postedAt: Date(timeIntervalSince1970: secs), receivedAt: Date(timeIntervalSince1970: secs),
                            cleared: false)
@@ -16,7 +17,8 @@ final class FuzzySearchTests: XCTestCase {
 
     func testWordStartBeatsScattered() {
         XCTAssertGreaterThan(FuzzySearch.score("dep", in: "deploy")!, FuzzySearch.score("dep", in: "dxexpx")!)
-        XCTAssertGreaterThan(FuzzySearch.score("green", in: "deploy is green")!, FuzzySearch.score("green", in: "gxrxexexn")!)
+        XCTAssertGreaterThan(FuzzySearch.score("green", in: "deploy is green")!,
+                             FuzzySearch.score("green", in: "gxrxexexn")!)
     }
 
     func testTokensCanMatchDifferentFields() {
@@ -32,13 +34,14 @@ final class FuzzySearchTests: XCTestCase {
         let items = [
             note("scattered", title: "dxexpxlxoxy", at: 3),
             note("old", title: "deploy", at: 1),
-            note("new", title: "deploy", at: 2),
+            note("new", title: "deploy", at: 2)
         ]
         XCTAssertEqual(FuzzySearch.search("deploy", in: items).map(\.key), ["new", "old", "scattered"])
     }
 
     func testSloppyQueryFindsIt() {
-        XCTAssertEqual(FuzzySearch.search("dploy grn", in: [note("a", title: "Ana", text: "deploy is green")]).map(\.key), ["a"])
+        let items = [note("a", title: "Ana", text: "deploy is green")]
+        XCTAssertEqual(FuzzySearch.search("dploy grn", in: items).map(\.key), ["a"])
     }
 
     func testBlankQueryReturnsInput() {

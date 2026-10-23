@@ -6,8 +6,14 @@ import org.junit.Test
 
 class ProtocolTest {
     private val record = SmsRecord(
-        id = 7, threadId = 3, address = "+15551234567", contactName = "Ana",
-        body = "hi", date = 1_000, outgoing = false, status = "received",
+        id = 7,
+        threadId = 3,
+        address = "+15551234567",
+        contactName = "Ana",
+        body = "hi",
+        date = 1_000,
+        outgoing = false,
+        status = "received",
     )
 
     @Test

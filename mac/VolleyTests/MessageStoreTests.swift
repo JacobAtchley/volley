@@ -25,7 +25,7 @@ final class MessageStoreTests: XCTestCase {
         store.upsert([
             sms(1, thread: 1, address: "+1555", name: "Ana", body: "old", date: 1_000),
             sms(2, thread: 2, address: "+1999", body: "newest", date: 3_000),
-            sms(3, thread: 1, address: "+1555", body: "latest ana", date: 2_000),
+            sms(3, thread: 1, address: "+1555", body: "latest ana", date: 2_000)
         ], deviceId: "d1")
         let convos = store.conversations(deviceId: "d1")
         XCTAssertEqual(convos.map(\.threadId), [2, 1])
@@ -39,7 +39,8 @@ final class MessageStoreTests: XCTestCase {
         XCTAssertNil(store.status(deviceId: "d1"))
         let s = DeviceStatus(battery: 50, charging: true, cellLevel: 2, wifiLevel: nil, wifiConnected: false)
         store.saveStatus(s, deviceId: "d1", at: Date(timeIntervalSince1970: 100))
-        XCTAssertEqual(store.status(deviceId: "d1"), StoredStatus(status: s, lastSeen: Date(timeIntervalSince1970: 100)))
+        let expected = StoredStatus(status: s, lastSeen: Date(timeIntervalSince1970: 100))
+        XCTAssertEqual(store.status(deviceId: "d1"), expected)
         store.markSeen(deviceId: "d1", at: Date(timeIntervalSince1970: 200))
         XCTAssertEqual(store.status(deviceId: "d1")?.lastSeen, Date(timeIntervalSince1970: 200))
         XCTAssertEqual(store.status(deviceId: "d1")?.status, s)

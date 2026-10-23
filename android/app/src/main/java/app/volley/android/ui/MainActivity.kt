@@ -75,9 +75,12 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme(
                 colorScheme = lightColorScheme(
-                    primary = Coral, onPrimary = Cocoa,
-                    background = Shell, onBackground = Cocoa,
-                    surface = Color.White, onSurface = Cocoa,
+                    primary = Coral,
+                    onPrimary = Cocoa,
+                    background = Shell,
+                    onBackground = Cocoa,
+                    surface = Color.White,
+                    onSurface = Cocoa,
                 ),
             ) {
                 Surface(Modifier.fillMaxSize(), color = Shell) { VolleyScreen() }
@@ -140,8 +143,11 @@ private fun VolleyScreen() {
                 val needsPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                     ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
                     PackageManager.PERMISSION_GRANTED
-                if (needsPermission) postLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                else TestNotifications.post(context)
+                if (needsPermission) {
+                    postLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                } else {
+                    TestNotifications.post(context)
+                }
             }) { Text("Send test notification", color = Cocoa) }
         }
 
@@ -206,7 +212,13 @@ private fun Section(title: String, content: @Composable () -> Unit) {
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(title.uppercase(), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Muted, letterSpacing = 1.sp)
+            Text(
+                title.uppercase(),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Muted,
+                letterSpacing = 1.sp,
+            )
             content()
         }
     }

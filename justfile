@@ -37,6 +37,27 @@ test-mac:
     xcodebuild -project mac/Volley.xcodeproj -scheme Volley -configuration Debug \
         -derivedDataPath mac/build test
 
+# Check style and lint both apps (no changes)
+lint: lint-android lint-mac
+
+# ktlint + Android Lint (warnings fail)
+lint-android:
+    cd android && ./gradlew ktlintCheck lintDebug
+
+# SwiftLint, strict (warnings fail)
+lint-mac:
+    @command -v swiftlint >/dev/null || { echo "swiftlint not found: brew install swiftlint"; exit 1; }
+    cd mac && swiftlint lint --strict
+
+# Auto-fix what the style checkers can fix
+format:
+    cd android && ./gradlew ktlintFormat
+    @command -v swiftlint >/dev/null || { echo "swiftlint not found: brew install swiftlint"; exit 1; }
+    cd mac && swiftlint --fix
+
+# Everything the CI gate runs: lint, tests, builds
+ci: lint test build
+
 # Install the Android app on the connected device and launch it
 deploy:
     cd android && ./gradlew installDebug

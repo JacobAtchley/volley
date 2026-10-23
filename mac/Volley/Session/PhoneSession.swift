@@ -136,7 +136,9 @@ final class PhoneSession {
     func unpair(_ device: PairedDevice) {
         trust.remove(deviceId: device.id)
         store.deleteDevice(device.id)
-        if defaults.string(forKey: Self.lastDeviceKey) == device.id { defaults.removeObject(forKey: Self.lastDeviceKey) }
+        if defaults.string(forKey: Self.lastDeviceKey) == device.id {
+            defaults.removeObject(forKey: Self.lastDeviceKey)
+        }
         pairedDevices = trust.all()
         if let current = active, current.deviceId == device.id {
             // Forget it now: the socket closes asynchronously and frames still in flight must be ignored.
@@ -251,7 +253,8 @@ final class PhoneSession {
         case MsgType.pairRequest:
             guard let req = Codec.body(PairRequest.self, from: data), codes.consume(req.code) else {
                 pairingCode = codes.current
-                sendRaw(MsgType.pairResult, PairResult(ok: false, macId: identity.id, macName: identity.name, token: nil),
+                let rejected = PairResult(ok: false, macId: identity.id, macName: identity.name, token: nil)
+                sendRaw(MsgType.pairResult, rejected,
                         to: id, closeAfter: true)
                 return
             }
@@ -261,7 +264,8 @@ final class PhoneSession {
             pairedDevices = trust.all()
             pairingCode = nil
             authenticate(id, device: device)
-            sendRaw(MsgType.pairResult, PairResult(ok: true, macId: identity.id, macName: identity.name, token: token), to: id)
+            let accepted = PairResult(ok: true, macId: identity.id, macName: identity.name, token: token)
+            sendRaw(MsgType.pairResult, accepted, to: id)
             requestSync(device.id)
 
         default:
@@ -276,12 +280,14 @@ final class PhoneSession {
                   !isExcluded(p.pkg) else { return }
             store.upsertNotification(p, deviceId: deviceId, receivedAt: now())
             reloadNotifications()
+            let posted = Date(timeIntervalSince1970: TimeInterval(p.postedAt) / 1000)
             notifier.showNotification(MirroredNotification(key: p.key, appName: p.appName, title: p.title, text: p.text,
-                                                           date: Date(timeIntervalSince1970: TimeInterval(p.postedAt) / 1000)))
+                                                           date: posted))
 
         case MsgType.notificationBatch:
             // Catch-up after reconnecting: store quietly, no banners.
-            guard let batch = Codec.body(NotificationBatch.self, from: data), let deviceId = active?.deviceId else { return }
+            guard let batch = Codec.body(NotificationBatch.self, from: data),
+                  let deviceId = active?.deviceId else { return }
             let receivedAt = now()
             for p in batch.notifications where !isExcluded(p.pkg) {
                 store.upsertNotification(p, deviceId: deviceId, receivedAt: receivedAt)

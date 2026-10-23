@@ -3,6 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
+    id("org.jlleitschuh.gradle.ktlint")
 }
 
 android {
@@ -29,8 +30,22 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
+    kotlinOptions {
+        jvmTarget = "17"
+        allWarningsAsErrors = true
+    }
     buildFeatures { compose = true }
+
+    lint {
+        warningsAsErrors = true
+        abortOnError = true
+        // These fire whenever a newer version is released, which would fail CI with no code change.
+        disable += setOf("GradleDependency", "AndroidGradlePluginVersion", "NewerVersionAvailable", "OldTargetApi")
+    }
+}
+
+ktlint {
+    version.set("1.5.0")
 }
 
 dependencies {

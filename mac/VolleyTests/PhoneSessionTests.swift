@@ -56,8 +56,8 @@ final class PhoneSessionTests: XCTestCase {
         session.sendSms(to: "+1555", threadId: 1, body: "on my way")
         XCTAssertEqual(session.openThread.map(\.state), [.delivered, .sending])
         let now = Int64(Date().timeIntervalSince1970 * 1000)
-        deliver(MsgType.smsBatch, SmsBatch(messages: [sms(2, body: "on my way", date: now, outgoing: true, status: "sent")],
-                                           done: true))
+        let echo = sms(2, body: "on my way", date: now, outgoing: true, status: "sent")
+        deliver(MsgType.smsBatch, SmsBatch(messages: [echo], done: true))
         XCTAssertEqual(session.openThread.map(\.body), ["hi", "on my way"])
         XCTAssertEqual(session.openThread.map(\.state), [.delivered, .delivered])
     }

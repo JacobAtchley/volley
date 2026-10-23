@@ -18,7 +18,8 @@ protocol TrustStore {
 /// Stores only a SHA-256 hash of each phone's token, in the app's sandboxed defaults, plus the
 /// non-secret device list (id + name). The Mac only ever checks a presented token, so it never needs
 /// the token back, and nothing here can trigger a Keychain prompt.
-final class HashedTrustStore: TrustStore {
+/// Sendable because every read-modify-write of the defaults goes through `lock` (migration runs off the main thread).
+final class HashedTrustStore: TrustStore, @unchecked Sendable {
     private let indexKey = "pairedDevices"
     private let hashesKey = "pairedTokenHashes"
     private let defaults: UserDefaults
@@ -114,7 +115,7 @@ struct KeychainLegacyTokens: LegacyTokenSource {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: account
         ]
     }
 }

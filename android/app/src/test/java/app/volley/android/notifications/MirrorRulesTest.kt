@@ -8,7 +8,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MirrorRulesTest {
-    private val rules = MirrorRules(ownPackage = "app.volley.android", defaultSmsPackage = "com.sms", excluded = setOf("com.slack"))
+    private val rules =
+        MirrorRules(ownPackage = "app.volley.android", defaultSmsPackage = "com.sms", excluded = setOf("com.slack"))
 
     private fun facts(
         key: String = "k",
@@ -29,8 +30,12 @@ class MirrorRulesTest {
     fun rejectsOngoingSummaryAndIgnoredCategories() {
         assertFalse(rules.allows(facts(ongoing = true)))
         assertFalse(rules.allows(facts(summary = true)))
-        listOf(Notification.CATEGORY_PROGRESS, Notification.CATEGORY_SERVICE, Notification.CATEGORY_TRANSPORT,
-            Notification.CATEGORY_SYSTEM).forEach { assertFalse(it, rules.allows(facts(category = it))) }
+        listOf(
+            Notification.CATEGORY_PROGRESS,
+            Notification.CATEGORY_SERVICE,
+            Notification.CATEGORY_TRANSPORT,
+            Notification.CATEGORY_SYSTEM,
+        ).forEach { assertFalse(it, rules.allows(facts(category = it))) }
     }
 
     @Test
@@ -59,8 +64,11 @@ class MirrorRulesTest {
 
     @Test
     fun batch_filtersBySinceTimeButActiveKeysCoverAllDays() {
-        val batch = notificationBatch(listOf(facts(key = "old", postTime = 900), facts(key = "new", postTime = 1_100)),
-            sinceTime = 1_000, rules = rules) { "Mail" }
+        val batch = notificationBatch(
+            listOf(facts(key = "old", postTime = 900), facts(key = "new", postTime = 1_100)),
+            sinceTime = 1_000,
+            rules = rules,
+        ) { "Mail" }
         assertEquals(listOf("new"), batch.notifications.map { it.key })
         assertEquals(setOf("old", "new"), batch.activeKeys.toSet())
         assertTrue(batch.done)
@@ -68,16 +76,22 @@ class MirrorRulesTest {
 
     @Test
     fun batch_excludesFilteredFromActiveKeys() {
-        val batch = notificationBatch(listOf(facts(key = "a"), facts(key = "s", pkg = "com.slack")),
-            sinceTime = 0, rules = rules) { it }
+        val batch = notificationBatch(
+            listOf(facts(key = "a"), facts(key = "s", pkg = "com.slack")),
+            sinceTime = 0,
+            rules = rules,
+        ) { it }
         assertEquals(listOf("a"), batch.activeKeys)
         assertEquals(listOf("a"), batch.notifications.map { it.key })
     }
 
     @Test
     fun batch_newestFirst() {
-        val batch = notificationBatch(listOf(facts(key = "a", postTime = 1), facts(key = "b", postTime = 2)),
-            sinceTime = 0, rules = rules) { it }
+        val batch = notificationBatch(
+            listOf(facts(key = "a", postTime = 1), facts(key = "b", postTime = 2)),
+            sinceTime = 0,
+            rules = rules,
+        ) { it }
         assertEquals(listOf("b", "a"), batch.notifications.map { it.key })
     }
 }

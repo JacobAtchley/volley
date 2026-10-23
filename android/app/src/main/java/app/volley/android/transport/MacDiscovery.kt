@@ -50,15 +50,18 @@ class NsdMacDiscovery(context: Context) : MacDiscovery {
     @Suppress("DEPRECATION")
     private suspend fun resolve(info: NsdServiceInfo): DiscoveredMac? = resolveLock.withLock {
         suspendCancellableCoroutine { cont ->
-            nsd.resolveService(info, object : NsdManager.ResolveListener {
-                override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-                    if (cont.isActive) cont.resume(null)
-                }
+            nsd.resolveService(
+                info,
+                object : NsdManager.ResolveListener {
+                    override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                        if (cont.isActive) cont.resume(null)
+                    }
 
-                override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
-                    if (cont.isActive) cont.resume(serviceInfo.toMac())
-                }
-            })
+                    override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
+                        if (cont.isActive) cont.resume(serviceInfo.toMac())
+                    }
+                },
+            )
         }
     }
 

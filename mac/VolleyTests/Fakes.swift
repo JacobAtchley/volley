@@ -39,7 +39,7 @@ final class FakeNotifier: DesktopNotifier {
 }
 
 func sms(_ id: Int64, thread: Int64 = 1, address: String = "+1555", name: String? = nil, body: String = "hi",
-            date: Int64 = 1_000, outgoing: Bool = false, status: String = "received") -> SmsRecord {
+         date: Int64 = 1_000, outgoing: Bool = false, status: String = "received") -> SmsRecord {
     SmsRecord(id: id, threadId: thread, address: address, contactName: name, body: body, date: date,
               outgoing: outgoing, status: status)
 }

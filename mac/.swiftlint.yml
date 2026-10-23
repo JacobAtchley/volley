@@ -1,0 +1,31 @@
+included:
+  - Volley
+  - VolleyTests
+excluded:
+  - build
+  - Volley.xcodeproj
+
+line_length:
+  warning: 120
+  error: 120
+  ignores_comments: false
+
+# Short names like `id`, `db`, `c`, `n`, `s` are clear in context here.
+identifier_name:
+  min_length: 1
+type_name:
+  min_length: 2
+
+# Every warning fails `swiftlint --strict` in CI.
+
+# The session's message router is one switch over message types; cases aren't real branching.
+cyclomatic_complexity:
+  ignores_case_statements: true
+
+# PhoneSession and the store are deliberately single cohesive types; split them when they grow further.
+type_body_length:
+  warning: 450
+  error: 450
+file_length:
+  warning: 600
+  error: 600

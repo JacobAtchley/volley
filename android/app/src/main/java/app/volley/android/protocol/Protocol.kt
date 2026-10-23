@@ -10,12 +10,7 @@ import java.util.UUID
 
 /** Wire envelope. See docs/PROTOCOL.md. */
 @Serializable
-data class Envelope(
-    val type: String,
-    val id: String,
-    val ts: Long,
-    val body: JsonObject,
-)
+data class Envelope(val type: String, val id: String, val ts: Long, val body: JsonObject)
 
 object MsgType {
     const val PAIR_REQUEST = "pair.request"
@@ -37,8 +32,12 @@ object MsgType {
 }
 
 @Serializable data class PairRequest(val deviceId: String, val deviceName: String, val code: String)
-@Serializable data class PairResult(val ok: Boolean, val macId: String = "", val macName: String = "", val token: String? = null)
+
+@Serializable
+data class PairResult(val ok: Boolean, val macId: String = "", val macName: String = "", val token: String? = null)
+
 @Serializable data class Hello(val deviceId: String, val deviceName: String, val token: String)
+
 @Serializable data class HelloOk(val macId: String, val macName: String)
 
 @Serializable
@@ -52,7 +51,9 @@ data class NotificationPosted(
 )
 
 @Serializable data class NotificationKey(val key: String)
+
 @Serializable data class NotificationFilter(val excludedPackages: List<String> = emptyList())
+
 @Serializable data class NotificationSync(val sinceTime: Long)
 
 @Serializable
@@ -61,10 +62,16 @@ data class NotificationBatch(
     val activeKeys: List<String> = emptyList(),
     val done: Boolean,
 )
+
 @Serializable data class SmsReceived(val address: String, val body: String, val receivedAt: Long)
-@Serializable data class SmsSend(val requestId: String, val address: String, val body: String, val threadId: Long? = null)
+
+@Serializable
+data class SmsSend(val requestId: String, val address: String, val body: String, val threadId: Long? = null)
+
 @Serializable data class SmsSent(val requestId: String, val ok: Boolean, val error: String? = null)
+
 @Serializable data class SmsSync(val sinceId: Long, val sinceTime: Long, val pendingIds: List<Long> = emptyList())
+
 @Serializable data class SmsBatch(val messages: List<SmsRecord>, val done: Boolean)
 
 @Serializable
@@ -94,20 +101,17 @@ object Codec {
         explicitNulls = false
     }
 
-    inline fun <reified T> encode(type: String, body: T): String =
-        json.encodeToString(
-            Envelope.serializer(),
-            Envelope(
-                type = type,
-                id = UUID.randomUUID().toString(),
-                ts = System.currentTimeMillis(),
-                body = json.encodeToJsonElement(body).jsonObject,
-            ),
-        )
+    inline fun <reified T> encode(type: String, body: T): String = json.encodeToString(
+        Envelope.serializer(),
+        Envelope(
+            type = type,
+            id = UUID.randomUUID().toString(),
+            ts = System.currentTimeMillis(),
+            body = json.encodeToJsonElement(body).jsonObject,
+        ),
+    )
 
-    fun decode(text: String): Envelope? =
-        runCatching { json.decodeFromString(Envelope.serializer(), text) }.getOrNull()
+    fun decode(text: String): Envelope? = runCatching { json.decodeFromString(Envelope.serializer(), text) }.getOrNull()
 }
 
-inline fun <reified T> Envelope.bodyAs(): T? =
-    runCatching { Codec.json.decodeFromJsonElement<T>(body) }.getOrNull()
+inline fun <reified T> Envelope.bodyAs(): T? = runCatching { Codec.json.decodeFromJsonElement<T>(body) }.getOrNull()

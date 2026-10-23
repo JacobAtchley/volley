@@ -60,9 +60,10 @@ final class LanServer: PhoneTransport {
             guard let conn = self.connections[id] else { return }
             let meta = NWProtocolWebSocket.Metadata(opcode: .text)
             let ctx = NWConnection.ContentContext(identifier: "text", metadata: [meta])
-            conn.send(content: data, contentContext: ctx, isComplete: true, completion: .contentProcessed { [weak self] _ in
+            let done = NWConnection.SendCompletion.contentProcessed { [weak self] _ in
                 if closeAfter { self?.drop(id) }
-            })
+            }
+            conn.send(content: data, contentContext: ctx, isComplete: true, completion: done)
         }
     }
 
@@ -85,7 +86,8 @@ final class LanServer: PhoneTransport {
 
             let fixed = usePreferredPort ? preferredPort.flatMap(NWEndpoint.Port.init(rawValue:)) : nil
             let l = try fixed.map { try NWListener(using: params, on: $0) } ?? NWListener(using: params)
-            l.service = NWListener.Service(name: serviceName, type: "_volley._tcp", domain: nil, txtRecord: NWTXTRecord(txt))
+            l.service = NWListener.Service(name: serviceName, type: "_volley._tcp", domain: nil,
+                                           txtRecord: NWTXTRecord(txt))
             l.stateUpdateHandler = { [weak self, weak l] state in
                 guard let self else { return }
                 switch state {
@@ -143,7 +145,8 @@ final class LanServer: PhoneTransport {
             guard let self else { return }
             if error != nil { self.drop(id); return }
 
-            let meta = context?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata
+            let meta = context?.protocolMetadata(definition: NWProtocolWebSocket.definition)
+                as? NWProtocolWebSocket.Metadata
             switch meta?.opcode {
             case .text?:
                 if let data { self.emit(.text(id, data)) }

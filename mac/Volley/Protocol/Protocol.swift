@@ -52,7 +52,7 @@ struct NotificationFilter: Codable { let excludedPackages: [String] }
 struct NotificationSync: Codable { let sinceTime: Int64 }
 struct NotificationBatch: Codable { let notifications: [NotificationPosted]; let activeKeys: [String]; let done: Bool }
 struct SmsReceived: Codable { let address: String; let body: String; let receivedAt: Int64 }
-struct SmsSend: Codable { let requestId: String; let address: String; let body: String; var threadId: Int64? = nil }
+struct SmsSend: Codable { let requestId: String; let address: String; let body: String; var threadId: Int64? }
 struct SmsSent: Codable { let requestId: String; let ok: Bool; let error: String? }
 struct SmsSync: Codable { let sinceId: Int64; let sinceTime: Int64; var pendingIds: [Int64] = [] }
 struct SmsBatch: Codable { let messages: [SmsRecord]; let done: Bool }
@@ -87,7 +87,8 @@ enum Codec {
     }
 
     static func encode<B: Encodable>(_ type: String, _ body: B) -> Data? {
-        let env = Outbound(type: type, id: UUID().uuidString, ts: Int64(Date().timeIntervalSince1970 * 1000), body: body)
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let env = Outbound(type: type, id: UUID().uuidString, ts: now, body: body)
         return try? encoder.encode(env)
     }
 }

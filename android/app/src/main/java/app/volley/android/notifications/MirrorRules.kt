@@ -18,11 +18,7 @@ data class NotificationFacts(
 )
 
 /** Which notifications get mirrored to the Mac. One place for live posts, removals and sync. */
-class MirrorRules(
-    val ownPackage: String,
-    val defaultSmsPackage: String?,
-    val excluded: Set<String>,
-) {
+class MirrorRules(val ownPackage: String, val defaultSmsPackage: String?, val excluded: Set<String>) {
     fun allows(f: NotificationFacts): Boolean {
         if (f.pkg == ownPackage) return f.channelId == TEST_CHANNEL
         if (f.ongoing || f.groupSummary) return false
