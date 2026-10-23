@@ -6,34 +6,55 @@ extension FsEntry: Identifiable {
     var id: String { name }
 }
 
-/// The phone's shared storage: list or icons, breadcrumbs, drag and drop both ways.
+extension UTType {
+    /// A phone path dragged out of the Phone pane, so the Mac pane can download it directly.
+    static let volleyPhonePath = UTType(exportedAs: "app.volley.phone-path")
+}
+
+/// Two panes: the phone's shared storage on the left, a Mac folder on the right; drag between them.
 struct FilesView: View {
     let files: FileSession
     let connected: Bool
+    @State private var mac = MacFolder()
 
     var body: some View {
-        Group {
-            if !connected {
-                Placeholder(text: "Phone offline")
-            } else if files.allFilesAccess == nil {
-                Placeholder(text: "Update Volley on your phone to browse its files")
-            } else if files.allFilesAccess == false {
-                Placeholder(text: "On your phone, open Volley and turn on All files access")
-            } else {
-                FileBrowser(files: files)
+        VStack(spacing: 0) {
+            HSplitView {
+                phonePane.frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+                MacPane(mac: mac, files: files).frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
+            }
+            TransferBar(files: files)
+        }
+        .onAppear {
+            // Refresh the Mac pane when a download lands in (or under) the folder it shows.
+            files.onTransferFinished = { [mac] _, url in
+                if let url, url.path.hasPrefix(mac.url.path) { mac.refresh() }
             }
         }
-        .task(id: connected && files.allFilesAccess == true) {
-            if connected, files.allFilesAccess == true, files.entries.isEmpty, !files.loading {
-                files.open(path: files.path)
-            }
+    }
+
+    @ViewBuilder
+    private var phonePane: some View {
+        if !connected {
+            Placeholder(text: "Phone offline")
+        } else if files.allFilesAccess == nil {
+            Placeholder(text: "Update Volley on your phone to browse its files")
+        } else if files.allFilesAccess == false {
+            Placeholder(text: "On your phone, open Volley and turn on All files access")
+        } else {
+            FileBrowser(files: files, mac: mac)
+                .task(id: connected && files.allFilesAccess == true) {
+                    if files.entries.isEmpty, !files.loading { files.open(path: files.path) }
+                }
         }
     }
 }
 
 private struct FileBrowser: View {
     let files: FileSession
+    let mac: MacFolder
     @State private var selection = Set<FsEntry.ID>()
+    @State private var sorted: [FsEntry] = []
     @State private var sortOrder = [KeyPathComparator(\FsEntry.name, comparator: .localizedStandard)]
     @State private var confirmingDelete: [FsEntry] = []
     @State private var deleteErrors: [FsDeleteFailure] = []
@@ -41,14 +62,18 @@ private struct FileBrowser: View {
 
     private var mode: FilesViewMode { files.viewMode(for: files.path) }
 
-    private var sorted: [FsEntry] {
+    /// Sorted once per listing page or sort change; sorting 5,000 entries on every render (e.g. each
+    /// thumbnail arriving) made big folders crawl.
+    private func resort() {
         let dirs = files.entries.filter(\.isDir).sorted(using: sortOrder)
         let rest = files.entries.filter { !$0.isDir }.sorted(using: sortOrder)
-        return dirs + rest
+        sorted = dirs + rest
     }
 
     var body: some View {
         VStack(spacing: 0) {
+            header
+            Divider()
             Group {
                 if let error = files.error {
                     Placeholder(text: error)
@@ -67,13 +92,10 @@ private struct FileBrowser: View {
                         .padding(6)
                 }
             }
-            .dropDestination(for: URL.self) { urls, _ in
-                files.upload(urls, into: files.path)
-                return true
-            } isTargeted: { dropTargeted = $0 }
-            TransferBar(files: files)
+            .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
+                uploadDropped(providers, into: files.path)
+            }
         }
-        .toolbar { toolbar }
         .onDeleteCommand { askToDelete(selection) }
         .confirmationDialog(deleteTitle, isPresented: .constant(!confirmingDelete.isEmpty), titleVisibility: .visible) {
             Button("Delete", role: .destructive) { delete(confirmingDelete) }
@@ -89,6 +111,9 @@ private struct FileBrowser: View {
             Text(deleteErrors.map { "\($0.path): \($0.error)" }.joined(separator: "\n"))
         }
         .onChange(of: files.path) { selection = [] }
+        .onChange(of: files.entries) { resort() }
+        .onChange(of: sortOrder) { resort() }
+        .onAppear { resort() }
     }
 
     // MARK: List
@@ -131,14 +156,13 @@ private struct FileBrowser: View {
                     IconTile(entry: e, thumbnail: files.thumbnails[files.childPath(e.name)],
                              selected: selection.contains(e.id))
                         .onAppear { if isMedia(e) { files.requestThumbnail(for: files.childPath(e.name)) } }
+                        .onDisappear { files.cancelThumbnail(for: files.childPath(e.name)) }
                         .onTapGesture(count: 2) { open([e.id]) }
                         .onTapGesture { selection = [e.id] }
                         .contextMenu { menu(for: selection.contains(e.id) ? selection : [e.id]) }
                         .onDrag { e.isDir ? NSItemProvider() : dragProvider(for: e) }
-                        .dropDestination(for: URL.self) { urls, _ in
-                            guard e.isDir else { return false }
-                            files.upload(urls, into: files.childPath(e.name))
-                            return true
+                        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+                            e.isDir && uploadDropped(providers, into: files.childPath(e.name))
                         }
                 }
             }
@@ -148,16 +172,16 @@ private struct FileBrowser: View {
 
     // MARK: Toolbar and menus
 
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .navigation) {
+    private var header: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "iphone.gen3").foregroundStyle(Color.coral)
             Button { files.back() } label: { Image(systemName: "chevron.left") }
-                .disabled(!files.canGoBack).help("Back")
+                .buttonStyle(.borderless).disabled(!files.canGoBack).help("Back")
             Button { files.forward() } label: { Image(systemName: "chevron.right") }
-                .disabled(!files.canGoForward).help("Forward")
-        }
-        ToolbarItem(placement: .principal) { breadcrumbs }
-        ToolbarItemGroup {
+                .buttonStyle(.borderless).disabled(!files.canGoForward).help("Forward")
+            breadcrumbs
+            Spacer(minLength: 4)
+            if files.loading { ProgressView().controlSize(.small) }
             Menu {
                 ForEach(["Download", "Pictures", "DCIM", "Documents", "Music", "Movies"], id: \.self) { place in
                     Button(place) { files.open(path: place) }
@@ -165,15 +189,18 @@ private struct FileBrowser: View {
                 Divider()
                 Toggle("Show Hidden Files", isOn: Binding(get: { files.showHidden }, set: { files.showHidden = $0 }))
             } label: {
-                Label("Places", systemImage: "folder")
+                Image(systemName: "folder")
             }
+            .menuStyle(.borderlessButton).fixedSize().help("Places")
             Picker("View", selection: Binding(get: { mode }, set: { files.setViewMode($0, for: files.path) })) {
                 Image(systemName: "list.bullet").tag(FilesViewMode.list).help("List")
                 Image(systemName: "square.grid.2x2").tag(FilesViewMode.icons).help("Icons")
             }
-            .pickerStyle(.segmented)
-            Button { files.refresh() } label: { Image(systemName: "arrow.clockwise") }.help("Refresh")
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
+            Button { files.refresh() } label: { Image(systemName: "arrow.clockwise") }
+                .buttonStyle(.borderless).help("Refresh")
         }
+        .padding(.horizontal, 10).padding(.vertical, 6)
     }
 
     private var breadcrumbs: some View {
@@ -197,6 +224,9 @@ private struct FileBrowser: View {
         let chosen = files.entries.filter { ids.contains($0.id) }
         if !chosen.isEmpty {
             Button("Open") { open(ids) }
+            Button("Copy to “\(mac.url.lastPathComponent)” on Mac") {
+                files.download(chosen.map { files.childPath($0.name) }, to: mac.url)
+            }
             Button("Download to…") { downloadTo(chosen) }
             Divider()
             Button("Delete…", role: .destructive) { askToDelete(ids) }
@@ -245,6 +275,12 @@ private struct FileBrowser: View {
     private func dragProvider(for e: FsEntry) -> NSItemProvider {
         let provider = NSItemProvider()
         provider.suggestedName = e.name
+        let phonePath = files.childPath(e.name)
+        provider.registerDataRepresentation(forTypeIdentifier: UTType.volleyPhonePath.identifier,
+                                            visibility: .ownProcess) { completion in
+            completion(Data(phonePath.utf8), nil)
+            return nil
+        }
         let type = UTType(filenameExtension: (e.name as NSString).pathExtension) ?? .data
         let remote = files.childPath(e.name)
         let staging = FileManager.default.temporaryDirectory.appendingPathComponent("Volley-drag/\(UUID().uuidString)")
@@ -261,6 +297,20 @@ private struct FileBrowser: View {
             return progress
         }
         return provider
+    }
+
+    /// Uploads Mac files dropped on the Phone pane. Rows dragged from the Phone pane itself are ignored,
+    /// so a stray drop can't download and re-upload a file.
+    private func uploadDropped(_ providers: [NSItemProvider], into dir: String) -> Bool {
+        let fromMac = providers.filter { !$0.hasItemConformingToTypeIdentifier(UTType.volleyPhonePath.identifier) }
+        guard !fromMac.isEmpty else { return false }
+        for provider in fromMac {
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                guard let url else { return }
+                Task { @MainActor in files.upload([url], into: dir) }
+            }
+        }
+        return true
     }
 
     private func isMedia(_ e: FsEntry) -> Bool {
@@ -310,23 +360,35 @@ private struct IconTile: View {
     }
 }
 
-/// Compact progress for the transfer on the wire, with cancel.
+/// Progress for the transfer on the wire, with cancel, and a popover listing every transfer.
 private struct TransferBar: View {
     let files: FileSession
+    @State private var showingAll = false
 
     var body: some View {
         let running = files.transfers.first { $0.state == .running }
         let queued = files.transfers.filter { $0.state == .queued }.count
-        if let running {
+        if !files.transfers.isEmpty {
             HStack(spacing: 10) {
-                Image(systemName: running.direction == .download ? "arrow.down.circle" : "arrow.up.circle")
-                    .foregroundStyle(Color.coral)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(running.name).font(.callout).lineLimit(1)
-                    ProgressView(value: Double(running.transferred), total: Double(max(running.size, 1)))
+                if let running {
+                    Image(systemName: running.direction == .download ? "arrow.down.circle" : "arrow.up.circle")
+                        .foregroundStyle(Color.coral)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(running.name).font(.callout).lineLimit(1)
+                        ProgressView(value: Double(running.transferred), total: Double(max(running.size, 1)))
+                    }
+                    if queued > 0 { Text("+\(queued) queued").font(.caption).foregroundStyle(.secondary) }
+                    Button("Cancel") { files.cancel(running.id) }
+                } else {
+                    Image(systemName: "checkmark.circle").foregroundStyle(.secondary)
+                    Text("No transfers running").font(.callout).foregroundStyle(.secondary)
+                    Spacer()
                 }
-                if queued > 0 { Text("+\(queued) queued").font(.caption).foregroundStyle(.secondary) }
-                Button("Cancel") { files.cancel(running.id) }
+                Button { showingAll.toggle() } label: { Image(systemName: "list.bullet.rectangle") }
+                    .buttonStyle(.borderless).help("All transfers")
+                    .popover(isPresented: $showingAll, arrowEdge: .top) {
+                        TransfersView(files: files).frame(width: 380, height: 320)
+                    }
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
             .background(.bar)
@@ -357,8 +419,12 @@ struct TransfersView: View {
                     }
                 }
             }
-            .toolbar {
-                Button("Clear") { files.clearFinished() }.help("Remove finished transfers")
+            .safeAreaInset(edge: .bottom) {
+                HStack {
+                    Spacer()
+                    Button("Clear Finished") { files.clearFinished() }
+                }
+                .padding(8)
             }
         }
     }
@@ -373,5 +439,122 @@ struct TransfersView: View {
         case let .failed(message): Text(message).foregroundStyle(.red)
         case .cancelled: Text("Cancelled")
         }
+    }
+}
+
+/// A Mac folder: browse, open, drag files to the Phone pane, drop phone files here to download.
+private struct MacPane: View {
+    let mac: MacFolder
+    let files: FileSession
+    @State private var selection = Set<MacEntry.ID>()
+    @State private var dropTargeted = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            Group {
+                if let error = mac.error {
+                    Placeholder(text: error)
+                } else if mac.entries.isEmpty {
+                    Placeholder(text: "Empty folder")
+                } else {
+                    table
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay {
+                if dropTargeted {
+                    RoundedRectangle(cornerRadius: 10).stroke(Color.coral, style: StrokeStyle(lineWidth: 3, dash: [6]))
+                        .padding(6)
+                }
+            }
+            .onDrop(of: [.volleyPhonePath], isTargeted: $dropTargeted) { providers in
+                downloadDropped(providers, into: mac.url)
+            }
+        }
+        .onChange(of: mac.url) { selection = [] }
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "laptopcomputer").foregroundStyle(Color.coral)
+            Button { mac.back() } label: { Image(systemName: "chevron.left") }
+                .buttonStyle(.borderless).disabled(!mac.canGoBack).help("Back")
+            Button { mac.forward() } label: { Image(systemName: "chevron.right") }
+                .buttonStyle(.borderless).disabled(!mac.canGoForward).help("Forward")
+            Text(mac.url.lastPathComponent).fontWeight(.semibold).lineLimit(1).truncationMode(.middle)
+                .help(mac.url.path)
+            Spacer(minLength: 4)
+            Menu {
+                ForEach(MacFolder.places, id: \.1) { name, url in Button(name) { mac.open(url) } }
+                Divider()
+                Button("Up One Level") { mac.open(mac.url.deletingLastPathComponent()) }
+            } label: {
+                Image(systemName: "folder")
+            }
+            .menuStyle(.borderlessButton).fixedSize().help("Places")
+            Button { mac.refresh() } label: { Image(systemName: "arrow.clockwise") }
+                .buttonStyle(.borderless).help("Refresh")
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+    }
+
+    private var table: some View {
+        Table(of: MacEntry.self, selection: $selection) {
+            TableColumn("Name") { e in
+                Label {
+                    Text(e.name)
+                } icon: {
+                    Image(nsImage: NSWorkspace.shared.icon(forFile: e.url.path))
+                        .resizable().frame(width: 16, height: 16)
+                }
+            }
+            TableColumn("Size") { e in
+                Text(e.isDir ? "—" : ByteCountFormatter.string(fromByteCount: e.size, countStyle: .file))
+                    .foregroundStyle(.secondary)
+            }
+            .width(min: 60, ideal: 80)
+            TableColumn("Modified") { e in Text(e.modified, format: .dateTime).foregroundStyle(.secondary) }
+                .width(min: 120, ideal: 150)
+        } rows: {
+            ForEach(mac.entries) { e in
+                TableRow(e).itemProvider { NSItemProvider(object: e.url as NSURL) }
+            }
+        }
+        .contextMenu(forSelectionType: MacEntry.ID.self) { ids in
+            if !ids.isEmpty {
+                Button("Open") { open(ids) }
+                Button("Copy to “\(phoneFolderName)” on Phone") {
+                    files.upload(Array(ids), into: files.path)
+                }
+                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(Array(ids)) }
+            }
+        } primaryAction: { ids in
+            open(ids)
+        }
+    }
+
+    private var phoneFolderName: String {
+        files.path.isEmpty ? "Phone" : (files.path as NSString).lastPathComponent
+    }
+
+    private func open(_ ids: Set<URL>) {
+        let chosen = mac.entries.filter { ids.contains($0.url) }
+        if chosen.count == 1, let folder = chosen.first, folder.isDir { return mac.open(folder.url) }
+        chosen.filter { !$0.isDir }.forEach { NSWorkspace.shared.open($0.url) }
+    }
+
+    /// Phone rows dropped here download straight into this folder.
+    private func downloadDropped(_ providers: [NSItemProvider], into dir: URL) -> Bool {
+        let phone = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.volleyPhonePath.identifier) }
+        guard !phone.isEmpty else { return false }
+        for provider in phone {
+            provider.loadDataRepresentation(forTypeIdentifier: UTType.volleyPhonePath.identifier) { data, _ in
+                guard let data, let path = String(data: data, encoding: .utf8) else { return }
+                Task { @MainActor in files.download([path], to: dir) }
+            }
+        }
+        return true
     }
 }

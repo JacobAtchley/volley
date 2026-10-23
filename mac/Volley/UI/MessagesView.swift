@@ -5,33 +5,44 @@ struct MessagesView: View {
     let session: PhoneSession
     @State private var selectedNotification: StoredNotification.ID?
 
+    private func sidebar(_ device: PairedDevice) -> some View {
+        List(selection: areaSelection) {
+            PhoneCard(device: device, connected: session.isConnected, status: session.deviceStatus)
+                .selectionDisabled()
+            Label("SMS", systemImage: "message").tag(PhoneArea.sms)
+            Label("Notifications", systemImage: "bell")
+                .badge(session.newNotificationCount)
+                .tag(PhoneArea.notifications)
+            Label("Files", systemImage: "folder").tag(PhoneArea.files)
+        }
+        .navigationSplitViewColumnWidth(min: 220, ideal: 240)
+    }
+
     private var areaSelection: Binding<PhoneArea?> {
         Binding(get: { session.area }, set: { if let area = $0 { session.select(area: area) } })
     }
 
     var body: some View {
-        if let device = session.currentDevice {
+        if let device = session.currentDevice, session.area == .files, let files = session.files {
+            // Files uses the full width for its two panes.
             NavigationSplitView {
-                List(selection: areaSelection) {
-                    PhoneCard(device: device, connected: session.isConnected, status: session.deviceStatus)
-                        .selectionDisabled()
-                    Label("SMS", systemImage: "message").tag(PhoneArea.sms)
-                    Label("Notifications", systemImage: "bell")
-                        .badge(session.newNotificationCount)
-                        .tag(PhoneArea.notifications)
-                    Label("Files", systemImage: "folder").tag(PhoneArea.files)
-                }
-                .navigationSplitViewColumnWidth(min: 220, ideal: 240)
+                sidebar(device)
+            } detail: {
+                FilesView(files: files, connected: session.isConnected)
+            }
+            .tint(.coral)
+        } else if let device = session.currentDevice {
+            NavigationSplitView {
+                sidebar(device)
             } content: {
                 Group {
                     switch session.area {
                     case .sms: ConversationList(session: session)
                     case .notifications: NotificationList(session: session, selection: $selectedNotification)
-                    case .files:
-                        if let files = session.files { FilesView(files: files, connected: session.isConnected) }
+                    case .files: EmptyView() // shown full width above
                     }
                 }
-                .navigationSplitViewColumnWidth(min: 260, ideal: session.area == .files ? 560 : 300)
+                .navigationSplitViewColumnWidth(min: 260, ideal: 300)
             } detail: {
                 switch session.area {
                 case .sms:
@@ -48,7 +59,7 @@ struct MessagesView: View {
                         Placeholder(text: "Choose a notification")
                     }
                 case .files:
-                    if let files = session.files { TransfersView(files: files) }
+                    EmptyView()
                 }
             }
             .tint(.coral)

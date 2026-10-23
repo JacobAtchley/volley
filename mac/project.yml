@@ -22,6 +22,10 @@ targets:
         LSUIElement: true
         NSLocalNetworkUsageDescription: Volley finds and talks to your phone on your local network.
         NSBonjourServices: [_volley._tcp]
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: app.volley.phone-path
+            UTTypeDescription: Volley phone file
+            UTTypeConformsTo: [public.data]
     # Not sandboxed: the Files pane browses any Mac folder (user's choice). SandboxMigration moves old data.
     entitlements:
       path: Volley/Volley.entitlements
