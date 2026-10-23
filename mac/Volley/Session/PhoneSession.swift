@@ -186,6 +186,21 @@ final class PhoneSession: FileLink {
         removeNotification(key)
     }
 
+    /// Notifications still showing on the phone, counted once per notification (not per history row).
+    var undismissedCount: Int { Set(notificationHistory.filter { !$0.cleared }.map(\.key)).count }
+
+    /// Dismisses every mirrored notification still showing on the phone and marks it cleared here.
+    /// History is kept. Does nothing offline: they'd show as uncleared again on the next sync.
+    func dismissAll() {
+        guard isConnected, let deviceId = currentDevice?.id else { return }
+        for key in Set(notificationHistory.filter { !$0.cleared }.map(\.key)) {
+            send(MsgType.notificationDismiss, NotificationKey(key: key))
+            store.markNotificationCleared(deviceId: deviceId, key: key)
+            notifier.removeNotification(key: key)
+        }
+        reloadNotifications()
+    }
+
     func select(area newArea: PhoneArea) {
         guard newArea != area else { return }
         if area == .notifications { leaveNotifications() }
