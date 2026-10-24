@@ -56,3 +56,11 @@ func sms(_ id: Int64, thread: Int64 = 1, address: String = "+1555", name: String
     SmsRecord(id: id, threadId: thread, address: address, contactName: name, body: body, date: date,
               outgoing: outgoing, status: status)
 }
+
+func mms(_ id: Int64, thread: Int64 = 1, address: String = "+1555", name: String? = nil, body: String = "hi",
+         date: Int64 = 1_000, outgoing: Bool = false, status: String = "received",
+         participants: [Participant] = [Participant(address: "+1555")], attachments: [Attachment] = []) -> SmsRecord {
+    SmsRecord(id: id, threadId: thread, address: address, contactName: name, body: body, date: date,
+              outgoing: outgoing, status: status, kind: "mms", participants: participants,
+              sender: outgoing ? nil : address, attachments: attachments)
+}

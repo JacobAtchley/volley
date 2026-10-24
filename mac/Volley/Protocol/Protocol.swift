@@ -33,6 +33,12 @@ enum MsgType {
     static let fsDelete = "fs.delete"
     static let fsDeleted = "fs.deleted"
     static let fsStatus = "fs.status"
+    static let mmsReceived = "mms.received"
+    static let mmsThumb = "mms.thumb"
+    static let mmsThumbData = "mms.thumbData"
+    static let mmsPart = "mms.part"
+    static let mmsAttach = "mms.attach"
+    static let mmsSend = "mms.send"
 }
 
 struct EnvelopeHeader: Decodable {
@@ -69,7 +75,13 @@ struct NotificationBatch: Codable { let notifications: [NotificationPosted]; let
 struct SmsReceived: Codable { let address: String; let body: String; let receivedAt: Int64 }
 struct SmsSend: Codable { let requestId: String; let address: String; let body: String; var threadId: Int64? }
 struct SmsSent: Codable { let requestId: String; let ok: Bool; let error: String? }
-struct SmsSync: Codable { let sinceId: Int64; let sinceTime: Int64; var pendingIds: [Int64] = [] }
+struct SmsSync: Codable {
+    let sinceId: Int64
+    let sinceTime: Int64
+    var pendingIds: [Int64] = []
+    var sinceMmsId: Int64 = 0
+    var pendingMmsIds: [Int64] = []
+}
 struct SmsBatch: Codable { let messages: [SmsRecord]; let done: Bool }
 struct SmsRecord: Codable, Equatable {
     let id: Int64
@@ -80,6 +92,61 @@ struct SmsRecord: Codable, Equatable {
     let date: Int64
     let outgoing: Bool
     let status: String
+    /// "sms" or "mms". SMS and MMS ids overlap, so messages are keyed by both.
+    var kind: String = "sms"
+    /// MMS only: everyone in the conversation except the phone itself.
+    var participants: [Participant] = []
+    /// MMS only: who sent an incoming message.
+    var sender: String?
+    var attachments: [Attachment] = []
+}
+
+extension SmsRecord {
+    /// Older phones leave out the MMS fields.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int64.self, forKey: .id)
+        threadId = try c.decode(Int64.self, forKey: .threadId)
+        address = try c.decode(String.self, forKey: .address)
+        contactName = try c.decodeIfPresent(String.self, forKey: .contactName)
+        body = try c.decode(String.self, forKey: .body)
+        date = try c.decode(Int64.self, forKey: .date)
+        outgoing = try c.decode(Bool.self, forKey: .outgoing)
+        status = try c.decode(String.self, forKey: .status)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? "sms"
+        participants = try c.decodeIfPresent([Participant].self, forKey: .participants) ?? []
+        sender = try c.decodeIfPresent(String.self, forKey: .sender)
+        attachments = try c.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
+    }
+}
+
+struct Participant: Codable, Equatable, Hashable { let address: String; var contactName: String? }
+struct Attachment: Codable, Equatable, Hashable {
+    let partId: Int64
+    let mime: String
+    var name: String?
+    let size: Int64
+    var width: Int?
+    var height: Int?
+}
+struct MmsReceived: Codable, Equatable {
+    let threadId: Int64
+    let sender: String
+    let senderName: String?
+    let title: String
+    let text: String
+    let hasPhoto: Bool
+}
+struct MmsThumb: Codable { let requestId: String; let partId: Int64; let maxPx: Int }
+struct MmsThumbData: Codable { let requestId: String; let jpegBase64: String?; let error: String? }
+struct MmsPartRequest: Codable { let transferId: String; let partId: Int64 }
+struct MmsAttach: Codable { let transferId: String; let name: String; let size: Int64 }
+struct MmsSend: Codable, Equatable {
+    let requestId: String
+    let threadId: Int64
+    let addresses: [String]
+    let text: String?
+    let attachments: [String]
 }
 struct DeviceStatus: Codable, Equatable {
     let battery: Int

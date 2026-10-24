@@ -9,8 +9,26 @@ struct ConversationSummary: Identifiable, Equatable {
     let name: String?
     let lastBody: String
     let lastDate: Date
+    /// Group members (names where known, numbers otherwise), from the thread's latest MMS.
+    var participants: [String] = []
     var id: Int64 { threadId }
-    var title: String { name ?? address }
+    var isGroup: Bool { participants.count > 1 }
+    /// "Ana", or for a group "Ana, Bob" / "Ana, Bob +2".
+    var title: String {
+        guard isGroup else { return name ?? address }
+        let shown = participants.prefix(2).joined(separator: ", ")
+        return participants.count > 2 ? "\(shown) +\(participants.count - 2)" : shown
+    }
+}
+
+struct StoredAttachment: Equatable, Hashable {
+    let partId: Int64
+    let mime: String
+    let name: String?
+    let size: Int64
+    let width: Int?
+    let height: Int?
+    var isImage: Bool { mime.hasPrefix("image/") }
 }
 
 struct StoredMessage: Identifiable, Equatable {
@@ -20,7 +38,13 @@ struct StoredMessage: Identifiable, Equatable {
     let date: Date
     let outgoing: Bool
     let status: String
-    var id: Int64 { phoneId }
+    var kind = "sms"
+    /// Incoming MMS: who sent it.
+    var sender: String?
+    var senderName: String?
+    var attachments: [StoredAttachment] = []
+    /// SMS and MMS ids overlap.
+    var id: String { "\(kind)\(phoneId)" }
 }
 
 struct StoredStatus: Equatable {
@@ -51,9 +75,10 @@ struct AppRef: Hashable, Identifiable {
 /// Messages and phone status mirrored from each paired phone. Errors are logged, not thrown.
 protocol MessageStore: AnyObject {
     func upsert(_ records: [SmsRecord], deviceId: String)
-    func lastPhoneId(deviceId: String) -> Int64
+    /// Highest phone id stored per kind ("sms" or "mms"); the two id spaces overlap.
+    func lastPhoneId(deviceId: String, kind: String) -> Int64
     /// Phone ids of outgoing messages still waiting to send, so a sync can learn how they settled.
-    func pendingPhoneIds(deviceId: String) -> [Int64]
+    func pendingPhoneIds(deviceId: String, kind: String) -> [Int64]
     func conversations(deviceId: String) -> [ConversationSummary]
     func messages(deviceId: String, threadId: Int64) -> [StoredMessage]
     func threadId(deviceId: String, address: String) -> Int64?
@@ -76,6 +101,11 @@ protocol MessageStore: AnyObject {
     func seenApps(deviceId: String) -> [AppRef]
 }
 
+extension MessageStore {
+    func lastPhoneId(deviceId: String) -> Int64 { lastPhoneId(deviceId: deviceId, kind: "sms") }
+    func pendingPhoneIds(deviceId: String) -> [Int64] { pendingPhoneIds(deviceId: deviceId, kind: "sms") }
+}
+
 /// SQLite via GRDB. Dates are stored as epoch milliseconds, matching the wire protocol.
 final class GRDBMessageStore: MessageStore {
     private let db: DatabaseQueue
@@ -86,7 +116,7 @@ final class GRDBMessageStore: MessageStore {
         try Self.migrator.migrate(db)
     }
 
-    private init(queue: DatabaseQueue) throws {
+    init(queue: DatabaseQueue) throws {
         db = queue
         try Self.migrator.migrate(db)
     }
@@ -96,7 +126,7 @@ final class GRDBMessageStore: MessageStore {
         try! GRDBMessageStore(queue: DatabaseQueue()) // swiftlint:disable:this force_try
     }
 
-    private static var migrator: DatabaseMigrator {
+    static var migrator: DatabaseMigrator {
         var m = DatabaseMigrator()
         m.registerMigration("v1") { db in
             try db.execute(sql: """
@@ -149,6 +179,51 @@ final class GRDBMessageStore: MessageStore {
                 CREATE TABLE notification_views (device_id TEXT PRIMARY KEY, last_viewed INTEGER NOT NULL);
                 """)
         }
+        // MMS: SMS and MMS ids overlap, so the key gains `kind`; groups and photos get their own tables.
+        m.registerMigration("v3") { db in
+            try db.execute(sql: """
+                CREATE TABLE messages_v3 (
+                    device_id TEXT NOT NULL,
+                    kind TEXT NOT NULL DEFAULT 'sms',
+                    phone_id INTEGER NOT NULL,
+                    thread_id INTEGER NOT NULL,
+                    address TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    date INTEGER NOT NULL,
+                    outgoing INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    sender TEXT,
+                    PRIMARY KEY (device_id, kind, phone_id)
+                );
+                INSERT INTO messages_v3 (device_id, kind, phone_id, thread_id, address, body, date, outgoing, status)
+                    SELECT device_id, 'sms', phone_id, thread_id, address, body, date, outgoing, status FROM messages;
+                DROP TABLE messages;
+                ALTER TABLE messages_v3 RENAME TO messages;
+                CREATE INDEX messages_thread ON messages (device_id, thread_id, date);
+                CREATE TABLE message_participants (
+                    device_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    phone_id INTEGER NOT NULL,
+                    position INTEGER NOT NULL,
+                    address TEXT NOT NULL,
+                    name TEXT,
+                    PRIMARY KEY (device_id, kind, phone_id, position)
+                );
+                CREATE TABLE attachments (
+                    device_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    phone_id INTEGER NOT NULL,
+                    position INTEGER NOT NULL,
+                    part_id INTEGER NOT NULL,
+                    mime TEXT NOT NULL,
+                    name TEXT,
+                    size INTEGER NOT NULL,
+                    width INTEGER,
+                    height INTEGER,
+                    PRIMARY KEY (device_id, kind, phone_id, position)
+                );
+                """)
+        }
         return m
     }
 
@@ -156,67 +231,136 @@ final class GRDBMessageStore: MessageStore {
         write { db in
             for r in records {
                 try db.execute(sql: """
-                    INSERT INTO messages (device_id, phone_id, thread_id, address, body, date, outgoing, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT (device_id, phone_id) DO UPDATE SET
+                    INSERT INTO messages
+                        (device_id, kind, phone_id, thread_id, address, body, date, outgoing, status, sender)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (device_id, kind, phone_id) DO UPDATE SET
                         thread_id = excluded.thread_id, address = excluded.address, body = excluded.body,
-                        date = excluded.date, outgoing = excluded.outgoing, status = excluded.status
-                    """, arguments: [deviceId, r.id, r.threadId, r.address, r.body, r.date, r.outgoing, r.status])
-                if let name = r.contactName {
-                    try db.execute(sql: "INSERT OR REPLACE INTO contacts (device_id, address, name) VALUES (?, ?, ?)",
-                                   arguments: [deviceId, r.address, name])
-                }
+                        date = excluded.date, outgoing = excluded.outgoing, status = excluded.status,
+                        sender = excluded.sender
+                    """, arguments: [deviceId, r.kind, r.id, r.threadId, r.address, r.body, r.date, r.outgoing,
+                                     r.status, r.sender])
+                if let name = r.contactName { try saveContact(db, deviceId: deviceId, address: r.address, name: name) }
+                if r.kind != "sms" { try saveMmsDetails(db, r, deviceId: deviceId) }
             }
         }
     }
 
-    func lastPhoneId(deviceId: String) -> Int64 {
+    private func saveContact(_ db: Database, deviceId: String, address: String, name: String) throws {
+        try db.execute(sql: "INSERT OR REPLACE INTO contacts (device_id, address, name) VALUES (?, ?, ?)",
+                       arguments: [deviceId, address, name])
+    }
+
+    /// Participants and attachments are replaced wholesale, so a resent MMS never duplicates them.
+    private func saveMmsDetails(_ db: Database, _ r: SmsRecord, deviceId: String) throws {
+        let key: StatementArguments = [deviceId, r.kind, r.id]
+        for table in ["message_participants", "attachments"] {
+            try db.execute(sql: "DELETE FROM \(table) WHERE device_id = ? AND kind = ? AND phone_id = ?",
+                           arguments: key)
+        }
+        for (i, p) in r.participants.enumerated() {
+            try db.execute(sql: """
+                INSERT INTO message_participants (device_id, kind, phone_id, position, address, name)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, arguments: key + [i, p.address, p.contactName])
+            if let name = p.contactName { try saveContact(db, deviceId: deviceId, address: p.address, name: name) }
+        }
+        for (i, a) in r.attachments.enumerated() {
+            try db.execute(sql: """
+                INSERT INTO attachments (device_id, kind, phone_id, position, part_id, mime, name, size, width, height)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, arguments: key + [i, a.partId, a.mime, a.name, a.size, a.width, a.height])
+        }
+    }
+
+    func lastPhoneId(deviceId: String, kind: String) -> Int64 {
         read { db in
-            try Int64.fetchOne(db, sql: "SELECT MAX(phone_id) FROM messages WHERE device_id = ?", arguments: [deviceId])
+            try Int64.fetchOne(db, sql: "SELECT MAX(phone_id) FROM messages WHERE device_id = ? AND kind = ?",
+                               arguments: [deviceId, kind])
         }.flatMap { $0 } ?? 0
     }
 
-    func pendingPhoneIds(deviceId: String) -> [Int64] {
+    func pendingPhoneIds(deviceId: String, kind: String) -> [Int64] {
         read { db in
             try Int64.fetchAll(db, sql: """
-                SELECT phone_id FROM messages WHERE device_id = ? AND status = 'pending' ORDER BY phone_id
-                """, arguments: [deviceId])
+                SELECT phone_id FROM messages WHERE device_id = ? AND kind = ? AND status = 'pending' ORDER BY phone_id
+                """, arguments: [deviceId, kind])
         } ?? []
     }
 
     func conversations(deviceId: String) -> [ConversationSummary] {
         read { db in
             // SQLite returns the bare columns from the row holding MAX(date) in each group.
-            try Row.fetchAll(db, sql: """
-                SELECT m.thread_id, m.address, c.name, m.body, MAX(m.date) AS date
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT m.thread_id, m.address, c.name, m.body, MAX(m.date) AS date, m.kind, m.phone_id
                 FROM messages m
                 LEFT JOIN contacts c ON c.device_id = m.device_id AND c.address = m.address
                 WHERE m.device_id = ?
                 GROUP BY m.thread_id
                 ORDER BY date DESC
-                """, arguments: [deviceId]).map { row in
-                ConversationSummary(threadId: row[0], address: row[1], name: row[2], lastBody: row[3],
-                                    lastDate: Self.date(row[4]))
+                """, arguments: [deviceId])
+            return try rows.map { row in
+                let threadId: Int64 = row[0]
+                var body: String = row[3]
+                if body.isEmpty {
+                    let mimes = try String.fetchAll(db, sql: """
+                        SELECT mime FROM attachments WHERE device_id = ? AND kind = ? AND phone_id = ?
+                        """, arguments: [deviceId, row[5] as String, row[6] as Int64])
+                    if !mimes.isEmpty { body = mimes.contains { $0.hasPrefix("image/") } ? "📷 Photo" : "📎 Attachment" }
+                }
+                return ConversationSummary(threadId: threadId, address: row[1], name: row[2], lastBody: body,
+                                           lastDate: Self.date(row[4]),
+                                           participants: try participants(db, deviceId: deviceId, threadId: threadId))
             }
         } ?? []
+    }
+
+    /// Labels for the members of the thread's latest MMS; empty for SMS-only threads.
+    private func participants(_ db: Database, deviceId: String, threadId: Int64) throws -> [String] {
+        try String.fetchAll(db, sql: """
+            SELECT COALESCE(p.name, c.name, p.address) FROM message_participants p
+            LEFT JOIN contacts c ON c.device_id = p.device_id AND c.address = p.address
+            WHERE p.device_id = ? AND p.kind = 'mms' AND p.phone_id = (
+                SELECT phone_id FROM messages WHERE device_id = ? AND thread_id = ? AND kind = 'mms'
+                ORDER BY date DESC LIMIT 1)
+            ORDER BY p.position
+            """, arguments: [deviceId, deviceId, threadId])
     }
 
     func messages(deviceId: String, threadId: Int64) -> [StoredMessage] {
         read { db in
-            try Row.fetchAll(db, sql: """
-                SELECT phone_id, thread_id, body, date, outgoing, status FROM messages
-                WHERE device_id = ? AND thread_id = ? ORDER BY date, phone_id
+            var attachments: [String: [StoredAttachment]] = [:]
+            for row in try Row.fetchAll(db, sql: """
+                SELECT a.kind, a.phone_id, a.part_id, a.mime, a.name, a.size, a.width, a.height FROM attachments a
+                JOIN messages m ON m.device_id = a.device_id AND m.kind = a.kind AND m.phone_id = a.phone_id
+                WHERE m.device_id = ? AND m.thread_id = ? ORDER BY a.position
+                """, arguments: [deviceId, threadId]) {
+                let kind: String = row[0], phoneId: Int64 = row[1]
+                attachments["\(kind)\(phoneId)", default: []].append(
+                    StoredAttachment(partId: row[2], mime: row[3], name: row[4], size: row[5], width: row[6],
+                                     height: row[7]))
+            }
+            return try Row.fetchAll(db, sql: """
+                SELECT m.phone_id, m.thread_id, m.body, m.date, m.outgoing, m.status, m.kind, m.sender, c.name
+                FROM messages m
+                LEFT JOIN contacts c ON c.device_id = m.device_id AND c.address = m.sender
+                WHERE m.device_id = ? AND m.thread_id = ? ORDER BY m.date, m.phone_id
                 """, arguments: [deviceId, threadId]).map { row in
-                StoredMessage(phoneId: row[0], threadId: row[1], body: row[2], date: Self.date(row[3]),
-                              outgoing: row[4], status: row[5])
+                var m = StoredMessage(phoneId: row[0], threadId: row[1], body: row[2], date: Self.date(row[3]),
+                                      outgoing: row[4], status: row[5], kind: row[6], sender: row[7],
+                                      senderName: row[8])
+                m.attachments = attachments[m.id] ?? []
+                return m
             }
         } ?? []
     }
 
+    /// The one-to-one SMS thread with `address` (group MMS threads also contain the sender's address).
     func threadId(deviceId: String, address: String) -> Int64? {
         read { db in
             try Int64.fetchOne(db, sql: """
-                SELECT thread_id FROM messages WHERE device_id = ? AND address = ? ORDER BY date DESC LIMIT 1
+                SELECT thread_id FROM messages WHERE device_id = ? AND address = ? AND kind = 'sms'
+                ORDER BY date DESC LIMIT 1
                 """, arguments: [deviceId, address])
         } ?? nil
     }
@@ -258,7 +402,8 @@ final class GRDBMessageStore: MessageStore {
 
     func deleteDevice(_ deviceId: String) {
         write { db in
-            for table in ["messages", "contacts", "device_status", "notifications", "notification_views"] {
+            for table in ["messages", "message_participants", "attachments", "contacts", "device_status",
+                          "notifications", "notification_views"] {
                 try db.execute(sql: "DELETE FROM \(table) WHERE device_id = ?", arguments: [deviceId])
             }
         }
