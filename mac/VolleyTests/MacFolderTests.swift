@@ -43,8 +43,9 @@ final class MacFolderTests: XCTestCase {
     }
 
     func testDefaultsToDownloads() {
+        // Checks the choice without listing ~/Downloads, which would trigger macOS's privacy prompt in CI/tests.
         let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-        XCTAssertEqual(MacFolder(defaults: defaults).url.standardizedFileURL, downloads.standardizedFileURL)
+        XCTAssertEqual(MacFolder.defaultFolder.standardizedFileURL, downloads.standardizedFileURL)
     }
 
     func testRefreshPicksUpNewFiles() throws {

@@ -32,6 +32,8 @@ final class MacFolder {
     @ObservationIgnored private var backStack: [URL] = []
     @ObservationIgnored private var forwardStack: [URL] = []
 
+    static let defaultFolder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+
     private static let lastFolderKey = "macPaneFolder"
     private static let sortKey = "macPaneSort"
 
@@ -53,7 +55,7 @@ final class MacFolder {
             var isDir: ObjCBool = false
             return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue ? url : nil
         }
-        url = start ?? remembered ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        url = start ?? remembered ?? Self.defaultFolder
         sort = defaults.string(forKey: Self.sortKey).flatMap(SortChoice.init(raw:)) ?? .byName
         refresh()
     }

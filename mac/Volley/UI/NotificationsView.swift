@@ -126,7 +126,7 @@ struct NotificationDetail: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Color.shell)
-        .foregroundStyle(Color.cocoa)
+        .foregroundStyle(Color.ink)
     }
 }
 
