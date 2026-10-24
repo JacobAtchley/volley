@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Messages.app-style window: the phone, its conversations, and the open chat.
 struct MessagesView: View {
@@ -150,6 +151,10 @@ private struct ConversationList: View {
                 ForEach(session.conversations) { c in
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(alignment: .firstTextBaseline) {
+                            if c.isGroup {
+                                Image(systemName: "person.2.fill").font(.caption).foregroundStyle(.secondary)
+                                    .accessibilityLabel("Group")
+                            }
                             Text(c.title).font(.headline).lineLimit(1)
                             Spacer()
                             Text(shortTime(c.lastDate)).font(.caption).foregroundStyle(.secondary)
@@ -169,14 +174,18 @@ private struct ConversationList: View {
 private struct ChatView: View {
     let session: PhoneSession
     @State private var draft = ""
+    /// Photos picked or dropped for the next message.
+    @State private var photos: [URL] = []
     @FocusState private var composing: Bool
 
     private var title: String {
         session.conversations.first { $0.threadId == session.openThreadId }?.title ?? ""
     }
 
-    private var address: String? {
-        session.conversations.first { $0.threadId == session.openThreadId }?.address
+    private var placeholder: String {
+        guard session.isConnected else { return "Phone offline" }
+        let isGroup = session.conversations.first { $0.threadId == session.openThreadId }?.isGroup == true
+        return isGroup ? "Message the group" : "Text message"
     }
 
     var body: some View {
@@ -191,7 +200,7 @@ private struct ChatView: View {
                                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                                     .padding(.top, 10)
                             }
-                            Bubble(item: item).id(item.id)
+                            Bubble(session: session, item: item).id(item.id)
                         }
                     }
                     .padding(16)
@@ -204,11 +213,50 @@ private struct ChatView: View {
         }
         .background(Color.shell)
         .navigationTitle(title)
+        .onDrop(of: [.fileURL], isTargeted: nil, perform: dropPhotos)
     }
 
     private var composer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !photos.isEmpty { photoStrip }
+            composerRow
+        }
+        .disabled(!session.isConnected)
+        .padding(12)
+        .onAppear { composing = true }
+    }
+
+    /// Photos waiting to go with the next message, each removable.
+    private var photoStrip: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(photos, id: \.self) { url in
+                    LocalImage(url: url, maxSide: 64)
+                        .overlay(alignment: .topTrailing) {
+                            Button { photos.removeAll { $0 == url } } label: {
+                                Image(systemName: "xmark.circle.fill").symbolRenderingMode(.palette)
+                                    .foregroundStyle(.white, .black.opacity(0.6))
+                            }
+                            .buttonStyle(.plain).padding(3)
+                            .accessibilityLabel("Remove \(url.lastPathComponent)")
+                        }
+                }
+            }
+        }
+        .scrollIndicators(.never)
+    }
+
+    private var composerRow: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            TextField(session.isConnected ? "Text message" : "Phone offline", text: $draft, axis: .vertical)
+            Button(action: pickPhotos) {
+                Image(systemName: "photo.badge.plus").font(.system(size: 18))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.muted)
+            .padding(.bottom, 6)
+            .help("Attach photos")
+            .accessibilityLabel("Attach photos")
+            TextField(placeholder, text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...6)
                 .focused($composing)
@@ -229,19 +277,43 @@ private struct ChatView: View {
             .disabled(!canSend)
             .accessibilityLabel("Send")
         }
-        .disabled(!session.isConnected)
-        .padding(12)
-        .onAppear { composing = true }
     }
 
     private var canSend: Bool {
-        session.isConnected && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        session.isConnected && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !photos.isEmpty)
     }
 
     private func send() {
-        guard canSend, let address else { return }
-        session.sendSms(to: address, threadId: session.openThreadId, body: draft)
+        guard canSend, let threadId = session.openThreadId else { return }
+        session.sendMessage(threadId: threadId, text: draft, attachments: photos)
         draft = ""
+        photos = []
+    }
+
+    private func pickPhotos() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.message = "Choose photos to send"
+        if panel.runModal() == .OK { addPhotos(panel.urls) }
+    }
+
+    private func dropPhotos(_ providers: [NSItemProvider]) -> Bool {
+        guard session.isConnected else { return false }
+        for provider in providers {
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                guard let url else { return }
+                Task { @MainActor in addPhotos([url]) }
+            }
+        }
+        return !providers.isEmpty
+    }
+
+    /// Images only; anything else can't go by MMS.
+    private func addPhotos(_ urls: [URL]) {
+        let images = urls.filter { UTType(filenameExtension: $0.pathExtension)?.conforms(to: .image) == true }
+        photos += images.filter { !photos.contains($0) }
     }
 
     private func scrollToEnd(_ proxy: ScrollViewProxy) {
@@ -250,18 +322,30 @@ private struct ChatView: View {
 }
 
 private struct Bubble: View {
+    let session: PhoneSession
     let item: ChatItem
 
     var body: some View {
         HStack {
             if item.outgoing { Spacer(minLength: 60) }
             VStack(alignment: item.outgoing ? .trailing : .leading, spacing: 2) {
-                Text(item.body)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 12).padding(.vertical, 7)
-                    .background(item.outgoing ? Color.coral : Color.blush, in: RoundedRectangle(cornerRadius: 16))
-                    .foregroundStyle(item.outgoing ? Color.onCoral : Color.ink)
-                    .opacity(item.state == .sending ? 0.6 : 1)
+                if let sender = item.sender {
+                    Text(sender).font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.leading, 12)
+                }
+                ForEach(item.attachments, id: \.partId) { a in
+                    AttachmentView(session: session, attachment: a)
+                }
+                ForEach(item.localImages, id: \.self) { url in
+                    LocalImage(url: url, maxSide: Self.photoSide).opacity(item.state == .sending ? 0.6 : 1)
+                }
+                if !item.body.isEmpty {
+                    Text(item.body)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(item.outgoing ? Color.coral : Color.blush, in: RoundedRectangle(cornerRadius: 16))
+                        .foregroundStyle(item.outgoing ? Color.onCoral : Color.ink)
+                        .opacity(item.state == .sending ? 0.6 : 1)
+                }
                 HStack(spacing: 4) {
                     if item.state == .failed {
                         Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red)
@@ -274,6 +358,67 @@ private struct Bubble: View {
             }
             if !item.outgoing { Spacer(minLength: 60) }
         }
+    }
+}
+
+extension Bubble {
+    /// Long side of a photo in a chat.
+    static let photoSide: CGFloat = 240
+}
+
+/// A photo from the phone (thumbnail fetched when it scrolls into view; click opens the original) or a
+/// labelled chip for anything else.
+private struct AttachmentView: View {
+    let session: PhoneSession
+    let attachment: StoredAttachment
+
+    var body: some View {
+        Button { session.openAttachment(attachment) } label: {
+            if attachment.isImage {
+                Group {
+                    if let data = session.mmsThumbs[attachment.partId], let image = NSImage(data: data) {
+                        Image(nsImage: image).resizable().scaledToFit()
+                    } else {
+                        RoundedRectangle(cornerRadius: 14).fill(.quaternary)
+                            .overlay { Image(systemName: "photo").foregroundStyle(.secondary) }
+                            .aspectRatio(aspect, contentMode: .fit)
+                    }
+                }
+                .frame(maxWidth: Bubble.photoSide, maxHeight: Bubble.photoSide)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .onAppear { session.requestMmsThumb(partId: attachment.partId) }
+            } else {
+                Label(attachment.name ?? attachment.mime, systemImage: "paperclip")
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 16))
+            }
+        }
+        .buttonStyle(.plain)
+        .help("Open in default app")
+        .accessibilityLabel(attachment.isImage ? "Photo" : attachment.name ?? "Attachment")
+    }
+
+    private var aspect: CGFloat {
+        guard let w = attachment.width, let h = attachment.height, w > 0, h > 0 else { return 4 / 3 }
+        return CGFloat(w) / CGFloat(h)
+    }
+}
+
+/// A photo from the Mac's disk, scaled to fit `maxSide`.
+private struct LocalImage: View {
+    let url: URL
+    let maxSide: CGFloat
+
+    var body: some View {
+        Group {
+            if let image = NSImage(contentsOf: url) {
+                Image(nsImage: image).resizable().scaledToFit()
+            } else {
+                Image(systemName: "photo").foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: maxSide, maxHeight: maxSide)
+        .clipShape(RoundedRectangle(cornerRadius: maxSide > 100 ? 14 : 8))
     }
 }
 
