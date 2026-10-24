@@ -26,8 +26,10 @@ struct ChatItem: Identifiable, Equatable {
     /// Group chats: who sent an incoming message.
     var sender: String?
     var attachments: [StoredAttachment] = []
-    /// Photos of a send still in flight, shown from the Mac's copies.
+    /// Photos sent from this Mac, shown from its own copies.
     var localImages: [URL] = []
+    /// Why a send failed, as the phone reported it.
+    var error: String?
 }
 
 /// A message sent from the Mac that the phone hasn't reported back yet. Kept in memory only.
@@ -39,6 +41,7 @@ private struct PendingSend {
     let date: Date
     var state: ChatItem.State
     var images: [URL] = []
+    var error: String?
 }
 
 struct MirroredNotification: Identifiable {
@@ -90,6 +93,8 @@ final class PhoneSession: FileLink {
     private let store: MessageStore
     private let defaults: UserDefaults
     private let now: () -> Date
+    /// Copies of photos sent from this Mac (the phone doesn't keep them).
+    private let sentPhotosDir: URL
     private let codes = PairingCodes()
     @ObservationIgnored private var unauthenticated = Set<ConnectionID>()
     @ObservationIgnored private var active: (conn: ConnectionID, deviceId: String)?
@@ -115,7 +120,11 @@ final class PhoneSession: FileLink {
     }
 
     init(identity: MacIdentity, transport: PhoneTransport, trust: TrustStore, notifier: DesktopNotifier,
-         store: MessageStore, defaults: UserDefaults = .standard, now: @escaping () -> Date = Date.init) {
+         store: MessageStore, defaults: UserDefaults = .standard, now: @escaping () -> Date = Date.init,
+         sentPhotosDir: URL? = nil) {
+        self.sentPhotosDir = sentPhotosDir ?? FileManager.default.urls(for: .applicationSupportDirectory,
+                                                                       in: .userDomainMask)[0]
+            .appendingPathComponent("Volley/Sent", isDirectory: true)
         self.identity = identity
         self.transport = transport
         self.trust = trust
@@ -213,10 +222,10 @@ final class PhoneSession: FileLink {
         reloadThread()
         let sendMms = { [weak self] (ids: [String]?) in
             guard let self else { return }
-            guard let ids, self.send(MsgType.mmsSend, MmsSend(requestId: requestId, threadId: threadId,
-                                                             addresses: recipients, text: body.isEmpty ? nil : body,
-                                                             attachments: ids)) else {
-                return self.markSend(requestId, ok: false)
+            guard let ids else { return self.markSend(requestId, ok: false, error: "A photo didn't upload") }
+            guard self.send(MsgType.mmsSend, MmsSend(requestId: requestId, threadId: threadId, addresses: recipients,
+                                                     text: body.isEmpty ? nil : body, attachments: ids)) else {
+                return self.markSend(requestId, ok: false, error: "Phone offline")
             }
         }
         guard !attachments.isEmpty else { return sendMms([]) }
@@ -390,7 +399,7 @@ final class PhoneSession: FileLink {
 
         case MsgType.smsSent:
             guard let r = Codec.body(SmsSent.self, from: data) else { return }
-            markSend(r.requestId, ok: r.ok)
+            markSend(r.requestId, ok: r.ok, error: r.error)
 
         case MsgType.smsBatch:
             guard let batch = Codec.body(SmsBatch.self, from: data), let deviceId = active?.deviceId else { return }
@@ -529,21 +538,43 @@ final class PhoneSession: FileLink {
         }
         let isGroup = conversations.first { $0.threadId == threadId }?.isGroup == true
         let stored = store.messages(deviceId: deviceId, threadId: threadId).map { m in
-            ChatItem(id: m.id, body: m.body, date: m.date, outgoing: m.outgoing,
-                     state: m.status == "failed" ? .failed : m.status == "pending" ? .sending : .delivered,
-                     sender: isGroup && !m.outgoing ? m.senderName ?? m.sender : nil, attachments: m.attachments)
+            let local = m.kind == "local"
+            return ChatItem(id: m.id, body: m.body, date: m.date, outgoing: m.outgoing,
+                            state: m.status == "failed" ? .failed : m.status == "pending" ? .sending : .delivered,
+                            sender: isGroup && !m.outgoing ? m.senderName ?? m.sender : nil,
+                            attachments: local ? [] : m.attachments,
+                            localImages: local ? m.attachments.compactMap { $0.name.map(URL.init(fileURLWithPath:)) }
+                                               : [])
         }
         let pending = pendingSends.filter { $0.threadId == threadId }.map {
             ChatItem(id: $0.requestId, body: $0.body, date: $0.date, outgoing: true, state: $0.state,
-                     localImages: $0.images)
+                     localImages: $0.images, error: $0.error)
         }
-        openThread = stored + pending
+        // Stable sort: sends that never echo back (photos) stay where they were sent.
+        openThread = (stored + pending).enumerated()
+            .sorted { ($0.element.date, $0.offset) < ($1.element.date, $1.offset) }
+            .map(\.element)
     }
 
-    private func markSend(_ requestId: String, ok: Bool) {
+    private func markSend(_ requestId: String, ok: Bool, error: String? = nil) {
         guard let i = pendingSends.firstIndex(where: { $0.requestId == requestId }) else { return }
         pendingSends[i].state = ok ? .delivered : .failed
-        reloadThread()
+        pendingSends[i].error = ok ? nil : error
+        if ok, !pendingSends[i].images.isEmpty { keepSentPhotos(pendingSends.remove(at: i)) }
+        reload()
+    }
+
+    /// Photo sends never come back from the phone, so they're stored here with copies of the photos.
+    private func keepSentPhotos(_ p: PendingSend) {
+        guard let deviceId = currentDevice?.id, let threadId = p.threadId else { return }
+        let fm = FileManager.default
+        try? fm.createDirectory(at: sentPhotosDir, withIntermediateDirectories: true)
+        let copies = p.images.compactMap { url -> URL? in
+            let copy = sentPhotosDir.appendingPathComponent("\(UUID().uuidString)-\(url.lastPathComponent)")
+            return (try? fm.copyItem(at: url, to: copy)) != nil ? copy : nil
+        }
+        store.saveLocalSend(LocalSend(threadId: threadId, address: p.address, body: p.body, date: p.date,
+                                      photos: copies), deviceId: deviceId)
     }
 
     /// The phone stores what we sent and syncs it back; drop our in-memory copy once it arrives.

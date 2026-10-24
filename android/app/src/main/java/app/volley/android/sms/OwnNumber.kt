@@ -26,10 +26,23 @@ fun ownNumberFrom(subscription: String?, inboxRecipientSets: List<Set<String>>):
 }
 
 /** Resolves and remembers this phone's number. The SIM number needs READ_PHONE_NUMBERS. */
-class AndroidOwnNumber(private val context: Context, private val mms: ContentResolverMmsSource) {
+class AndroidOwnNumber(
+    private val context: Context,
+    private val mms: ContentResolverMmsSource,
+    private val clock: () -> Long = System::currentTimeMillis,
+) {
     @Volatile private var known: String? = null
 
-    fun get(): String? = known ?: ownNumberFrom(subscriptionNumber(), mms.recentInboxRecipients()).also { known = it }
+    /** When the last lookup found nothing; retried after [RETRY_MS] (the permission may be granted later). */
+    @Volatile private var missedAt = Long.MIN_VALUE / 2
+
+    fun get(): String? {
+        known?.let { return it }
+        if (clock() - missedAt < RETRY_MS) return null
+        return ownNumberFrom(subscriptionNumber(), mms.recentInboxRecipients()).also {
+            if (it != null) known = it else missedAt = clock()
+        }
+    }
 
     // Used only to leave this phone out of group replies, never as a device identifier.
     @SuppressLint("HardwareIds")
@@ -39,8 +52,14 @@ class AndroidOwnNumber(private val context: Context, private val mms: ContentRes
         if (!granted) return null
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.getSystemService(SubscriptionManager::class.java)
-                    .getPhoneNumber(SubscriptionManager.getDefaultSubscriptionId())
+                // The SIM often has no number recorded; the carrier or IMS registration usually does.
+                val subs = context.getSystemService(SubscriptionManager::class.java)
+                val subId = SubscriptionManager.getDefaultSmsSubscriptionId()
+                listOf(
+                    SubscriptionManager.PHONE_NUMBER_SOURCE_UICC,
+                    SubscriptionManager.PHONE_NUMBER_SOURCE_CARRIER,
+                    SubscriptionManager.PHONE_NUMBER_SOURCE_IMS,
+                ).firstNotNullOfOrNull { source -> subs.getPhoneNumber(subId, source).takeIf { it.isNotBlank() } }
             } else {
                 @Suppress("DEPRECATION")
                 context.getSystemService(TelephonyManager::class.java).line1Number
@@ -48,5 +67,9 @@ class AndroidOwnNumber(private val context: Context, private val mms: ContentRes
         } catch (e: SecurityException) {
             null
         }
+    }
+
+    private companion object {
+        const val RETRY_MS = 10 * 60 * 1000L
     }
 }

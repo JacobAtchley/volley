@@ -76,7 +76,8 @@ go to App info → ⋮ → **Allow restricted settings**.
   disconnected can't be recovered.
 - History starts from today when first synced.
 - RCS ("chat features") messages aren't mirrored: Google Messages stores them as restricted, and Android hides
-  restricted messages from every app except the default messaging app. Their notifications are still mirrored.
+  restricted messages from every app except the default messaging app. (The messaging app's own notifications
+  aren't mirrored either, since texts already arrive directly.)
 - A photo sent from the Mac reaches the recipient, but Android doesn't record it in the phone's message history
   (Volley isn't the default messaging app), so Google Messages may show it as not sent.
 - Only one phone is connected at a time.

@@ -8,6 +8,8 @@ final class MmsSessionTests: XCTestCase {
     private var store: GRDBMessageStore!
     private var session: PhoneSession!
     private var files: FileSession!
+    private var trust: FakeTrust!
+    private var sentDir: URL!
     private let conn = ConnectionID()
     private let ana = Participant(address: "+1555", contactName: "Ana")
     private let bob = Participant(address: "+1777", contactName: "Bob")
@@ -15,11 +17,17 @@ final class MmsSessionTests: XCTestCase {
     override func setUp() async throws {
         transport = FakeTransport()
         notifier = FakeNotifier()
-        let trust = FakeTrust()
+        trust = FakeTrust()
         trust.save(PairedDevice(id: "d1", name: "Pixel"), token: "t1")
         store = GRDBMessageStore.inMemory()
+        sentDir = FileManager.default.temporaryDirectory.appendingPathComponent("volley-sent-\(UUID())")
+        addTeardownBlock { [sentDir] in try? FileManager.default.removeItem(at: sentDir!) }
+        makeSession()
+    }
+
+    private func makeSession() {
         session = PhoneSession(identity: MacIdentity(id: "mac", name: "Mac"), transport: transport, trust: trust,
-                               notifier: notifier, store: store, defaults: scratchDefaults())
+                               notifier: notifier, store: store, defaults: scratchDefaults(), sentPhotosDir: sentDir)
         files = FileSession(link: session, defaults: scratchDefaults())
         session.files = files
         session.onFileMessage = { [files] in files?.handle(type: $0, data: $1) }
@@ -157,6 +165,44 @@ final class MmsSessionTests: XCTestCase {
         XCTAssertEqual(session.mmsThumbs[70], Data([1, 2]))
         session.requestMmsThumb(partId: 70)
         XCTAssertEqual(transport.sentBodies(MsgType.mmsThumb, as: MmsThumb.self).count, 1)
+    }
+}
+
+extension MmsSessionTests {
+    func testNotSentShowsTheReason() throws {
+        connect()
+        groupThread()
+        session.open(threadId: 4)
+        session.sendMessage(threadId: 4, text: "hi all")
+        let req = try XCTUnwrap(transport.sentBodies(MsgType.mmsSend, as: MmsSend.self).single)
+        deliver(MsgType.smsSent, SmsSent(requestId: req.requestId, ok: false, error: "Photo too large to send by MMS"))
+        XCTAssertEqual(session.openThread.last?.error, "Photo too large to send by MMS")
+    }
+
+    func testSentPhotoKeepsItsPlaceAndSurvivesRestart() throws {
+        connect()
+        deliver(MsgType.smsBatch, SmsBatch(messages: [sms(1, thread: 2, address: "+1555", date: 1_000)], done: true))
+        session.open(threadId: 2)
+        let url = try photo()
+        session.sendMessage(threadId: 2, text: "look", attachments: [url])
+        _ = try acceptUpload()
+        let req = try XCTUnwrap(transport.sentBodies(MsgType.mmsSend, as: MmsSend.self).single)
+        deliver(MsgType.smsSent, SmsSent(requestId: req.requestId, ok: true, error: nil))
+
+        // A reply that arrives later is shown after the photo, not above it.
+        let later = Int64(Date().timeIntervalSince1970 * 1000) + 60_000
+        deliver(MsgType.smsBatch, SmsBatch(messages: [sms(2, thread: 2, address: "+1555", body: "nice", date: later)],
+                                           done: true))
+        XCTAssertEqual(session.openThread.map(\.body), ["hi", "look", "nice"])
+
+        transport.onEvent?(.closed(conn))
+        makeSession()
+        session.open(threadId: 2)
+        let photoItem = try XCTUnwrap(session.openThread.first { $0.body == "look" })
+        XCTAssertEqual(photoItem.state, .delivered)
+        let saved = try XCTUnwrap(photoItem.localImages.single)
+        XCTAssertTrue(saved.path.hasPrefix(sentDir.path))
+        XCTAssertEqual(try Data(contentsOf: saved), Data("jpeg".utf8))
     }
 }
 

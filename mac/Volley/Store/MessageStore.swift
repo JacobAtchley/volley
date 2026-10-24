@@ -47,6 +47,15 @@ struct StoredMessage: Identifiable, Equatable {
     var id: String { "\(kind)\(phoneId)" }
 }
 
+/// A photo message sent from this Mac; see `MessageStore.saveLocalSend`.
+struct LocalSend {
+    let threadId: Int64
+    let address: String
+    let body: String
+    let date: Date
+    let photos: [URL]
+}
+
 struct StoredStatus: Equatable {
     let status: DeviceStatus?
     let lastSeen: Date
@@ -84,6 +93,9 @@ protocol MessageStore: AnyObject {
     func threadId(deviceId: String, address: String) -> Int64?
     /// Addresses of everyone in the thread (from its latest MMS); empty for SMS-only threads.
     func participantAddresses(deviceId: String, threadId: Int64) -> [String]
+    /// Records a photo message sent from this Mac. Android doesn't keep photo MMS sent by Volley (it isn't the
+    /// default SMS app), so this copy is the only one; it's stored with kind "local" and the photos' file paths.
+    func saveLocalSend(_ send: LocalSend, deviceId: String)
     func saveStatus(_ status: DeviceStatus, deviceId: String, at: Date)
     func markSeen(deviceId: String, at: Date)
     func status(deviceId: String) -> StoredStatus?
@@ -367,6 +379,25 @@ final class GRDBMessageStore: MessageStore {
                 ORDER BY position
                 """, arguments: [deviceId, deviceId, threadId])
         } ?? []
+    }
+
+    func saveLocalSend(_ send: LocalSend, deviceId: String) {
+        write { db in
+            let id = (try Int64.fetchOne(db, sql: """
+                SELECT MIN(phone_id) FROM messages WHERE device_id = ? AND kind = 'local'
+                """, arguments: [deviceId]) ?? 0) - 1
+            try db.execute(sql: """
+                INSERT INTO messages (device_id, kind, phone_id, thread_id, address, body, date, outgoing, status)
+                VALUES (?, 'local', ?, ?, ?, ?, ?, 1, 'sent')
+                """, arguments: [deviceId, min(id, -1), send.threadId, send.address, send.body,
+                                 Self.millis(send.date)])
+            for (i, url) in send.photos.enumerated() {
+                try db.execute(sql: """
+                    INSERT INTO attachments (device_id, kind, phone_id, position, part_id, mime, name, size)
+                    VALUES (?, 'local', ?, ?, ?, 'image/jpeg', ?, 0)
+                    """, arguments: [deviceId, min(id, -1), i, -Int64(i) - 1, url.path])
+            }
+        }
     }
 
     /// The one-to-one SMS thread with `address` (group MMS threads also contain the sender's address).

@@ -42,6 +42,8 @@ class MmsHandlersTest {
 
     private val sendCalls = mutableListOf<SendCall>()
     private var sendResult: Pair<Boolean, String?> = true to null
+    private var senderThrows = false
+    private var attachDir: File? = null
 
     private val parts = object : MmsParts {
         override fun open(partId: Long) = if (partId == 42L) {
@@ -71,13 +73,15 @@ class MmsHandlersTest {
             parts = parts,
             transfers = files,
             sender = { _, to, text, images, onResult ->
+                if (senderThrows) error("decoder crashed")
                 sendCalls += SendCall(to, text, images.map { it.readBytes() })
                 onResult(sendResult.first, sendResult.second)
             },
-            attachDir = tmp.newFolder("mms-out"),
+            attachDir = attachDir ?: tmp.newFolder("mms-out"),
             send = ::record,
             thumbs = { thumbWork += it },
             sends = { sendWork += it },
+            ownNumber = { "+1 (555) 999-0000" },
         )
     }
 
@@ -186,5 +190,28 @@ class MmsHandlersTest {
         deliver(MsgType.FS_END, FsEnd(id.toString(), "00"))
         assertEquals(listOf(false), bodies<FsDone>(MsgType.FS_DONE).map { it.ok })
         assertTrue(File(tmp.root, "mms-out").listFiles()!!.isEmpty())
+    }
+
+    @Test
+    fun sendLeavesOutThisPhonesOwnNumber() {
+        deliver(MsgType.MMS_SEND, MmsSend("s4", threadId = 3, addresses = listOf("+1555", "5559990000", "+1777"), "hi"))
+        sendWork.single().run()
+        assertEquals(listOf("+1555", "+1777"), sendCalls.single().to)
+    }
+
+    @Test
+    fun attachFailureRepliesInsteadOfDroppingTheConnection() {
+        attachDir = tmp.newFile("not-a-folder")
+        val id = UUID.randomUUID().toString()
+        deliver(MsgType.MMS_ATTACH, MmsAttach(id, "p.jpg", 4))
+        assertEquals(listOf(id to false), bodies<FsDone>(MsgType.FS_DONE).map { it.transferId to it.ok })
+    }
+
+    @Test
+    fun senderCrashRepliesNotSent() {
+        senderThrows = true
+        deliver(MsgType.MMS_SEND, MmsSend("s5", threadId = 3, addresses = listOf("+1555"), "hi"))
+        sendWork.single().run()
+        assertEquals(listOf(false), bodies<SmsSent>(MsgType.SMS_SENT).map { it.ok })
     }
 }

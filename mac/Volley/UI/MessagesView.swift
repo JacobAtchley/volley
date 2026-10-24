@@ -349,7 +349,7 @@ private struct Bubble: View {
                 HStack(spacing: 4) {
                     if item.state == .failed {
                         Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red)
-                        Text("Not sent").foregroundStyle(.red)
+                        Text(item.error.map { "Not sent: \($0)" } ?? "Not sent").foregroundStyle(.red)
                     } else {
                         Text(item.date, format: .dateTime.hour().minute())
                     }

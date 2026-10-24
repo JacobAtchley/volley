@@ -59,6 +59,9 @@ class SmsSyncer(
     private var floor = 0L
     private var pendingIds = emptySet<Long>()
     private var mmsCursor = 0L
+
+    /** Only Macs that send a MMS cursor understand MMS records. */
+    private var mmsWanted = false
     private var mmsFloorSec = 0L
 
     /** Pending MMS plus ones still downloading (m_type 130), watched until they settle. */
@@ -70,13 +73,15 @@ class SmsSyncer(
         sinceId: Long,
         sinceTime: Long,
         macPendingIds: Collection<Long> = emptyList(),
-        sinceMmsId: Long = 0,
+        sinceMmsId: Long? = 0,
         macPendingMmsIds: Collection<Long> = emptyList(),
     ) {
+        mmsWanted = sinceMmsId != null
+        val mmsSince = sinceMmsId ?: 0
         val fresh = toRecords(source.since(sinceId, sinceTime))
         val old = toRecords(source.byIds(macPendingIds.filter { it <= sinceId }))
-        val mmsFresh = mms.since(sinceMmsId, sinceTime / 1000)
-        val mmsRows = mms.byIds(macPendingMmsIds.filter { it <= sinceMmsId }) + mmsFresh
+        val mmsFresh = if (mmsWanted) mms.since(mmsSince, sinceTime / 1000) else emptyList()
+        val mmsRows = if (mmsWanted) mms.byIds(macPendingMmsIds.filter { it <= mmsSince }) + mmsFresh else emptyList()
         val mmsRecords = toMmsRecords(mmsRows)
         val records = old + fresh + mmsRecords
         val chunks = records.chunked(CHUNK).ifEmpty { listOf(emptyList()) }
@@ -84,7 +89,7 @@ class SmsSyncer(
         cursor = maxOf(sinceId, fresh.maxOfOrNull { it.id } ?: 0)
         floor = sinceTime
         pendingIds = (old + fresh).pendingIds()
-        mmsCursor = maxOf(sinceMmsId, mmsFresh.maxOfOrNull { it.id } ?: 0)
+        mmsCursor = maxOf(mmsSince, mmsFresh.maxOfOrNull { it.id } ?: 0)
         mmsFloorSec = sinceTime / 1000
         mmsWaiting = waiting(mmsRows, mmsRecords)
     }
@@ -94,7 +99,7 @@ class SmsSyncer(
         val from = cursor ?: return
         val fresh = toRecords(source.since(from, floor))
         val settled = toRecords(source.byIds(pendingIds)).filter { it.status != PENDING }
-        val mmsFreshRows = mms.since(mmsCursor, mmsFloorSec)
+        val mmsFreshRows = if (mmsWanted) mms.since(mmsCursor, mmsFloorSec) else emptyList()
         val mmsFresh = toMmsRecords(mmsFreshRows)
         val mmsSettled = toMmsRecords(mms.byIds(mmsWaiting)).filter { it.status != PENDING }
         val records = settled + fresh + mmsSettled + mmsFresh

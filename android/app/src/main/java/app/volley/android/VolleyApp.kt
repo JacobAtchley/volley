@@ -121,6 +121,7 @@ class AppGraph(context: Context) {
         // Like file thumbnails: one worker, newest requests win while scrolling.
         thumbs = ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS, LinkedBlockingQueue(64), DiscardOldestPolicy())::execute,
         sends = Executors.newSingleThreadExecutor()::execute,
+        ownNumber = ownNumber::get,
     )
     private var lastFileAccess: Boolean? = null
 

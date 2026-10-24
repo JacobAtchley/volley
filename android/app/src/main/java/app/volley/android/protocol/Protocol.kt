@@ -96,7 +96,8 @@ data class SmsSync(
     val sinceId: Long,
     val sinceTime: Long,
     val pendingIds: List<Long> = emptyList(),
-    val sinceMmsId: Long = 0,
+    /** Absent from Macs that predate MMS: they get no MMS, which they'd store over SMS with the same id. */
+    val sinceMmsId: Long? = null,
     val pendingMmsIds: List<Long> = emptyList(),
 )
 

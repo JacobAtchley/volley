@@ -39,6 +39,8 @@ class SmsObserver(
         registered = try {
             resolver.registerContentObserver(Telephony.Sms.CONTENT_URI, true, observer)
             resolver.registerContentObserver(Telephony.Mms.CONTENT_URI, true, observer)
+            // Some Android versions announce MMS changes only on the combined URI.
+            resolver.registerContentObserver(Telephony.MmsSms.CONTENT_URI, true, observer)
             true
         } catch (e: SecurityException) {
             false

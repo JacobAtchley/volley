@@ -12,6 +12,7 @@ import app.volley.android.protocol.MmsThumbData
 import app.volley.android.protocol.MsgType
 import app.volley.android.protocol.SmsSent
 import app.volley.android.protocol.bodyAs
+import app.volley.android.sms.normalize
 import java.io.File
 import java.io.InputStream
 import java.util.Base64
@@ -48,20 +49,40 @@ class MmsHandlers(
     private val send: (String) -> Boolean,
     private val thumbs: (Runnable) -> Unit,
     private val sends: (Runnable) -> Unit,
+    /** This phone's number, left out of recipients so a group reply never texts yourself. */
+    private val ownNumber: () -> String? = { null },
 ) {
     /** Uploaded photos waiting for their `mms.send`, by transfer id. */
     private val attachments = ConcurrentHashMap<UUID, File>()
 
     val types = listOf(MsgType.MMS_THUMB, MsgType.MMS_PART, MsgType.MMS_ATTACH, MsgType.MMS_SEND)
 
+    /** Like `FileHandlers.handle`: one failed request (cache full, unreadable part…) must not drop the connection. */
     fun handle(env: Envelope) {
         when (env.type) {
             MsgType.MMS_THUMB -> env.bodyAs<MmsThumb>()?.let(::thumb)
-            MsgType.MMS_PART -> env.bodyAs<MmsPartRequest>()?.let(::part)
-            MsgType.MMS_ATTACH -> env.bodyAs<MmsAttach>()?.let(::attach)
-            MsgType.MMS_SEND -> env.bodyAs<MmsSend>()?.let(::sendMms)
+            MsgType.MMS_PART -> env.bodyAs<MmsPartRequest>()?.let { req ->
+                guarded({ failTransfer(req.transferId, it) }) { part(req) }
+            }
+            MsgType.MMS_ATTACH -> env.bodyAs<MmsAttach>()?.let { req ->
+                guarded({ failTransfer(req.transferId, it) }) { attach(req) }
+            }
+            MsgType.MMS_SEND -> env.bodyAs<MmsSend>()?.let { req ->
+                guarded({ reply(req.requestId, false, it) }) { sendMms(req) }
+            }
         }
     }
+
+    private inline fun guarded(onError: (String) -> Unit, block: () -> Unit) {
+        try {
+            block()
+        } catch (e: Exception) {
+            onError(e.message ?: "Phone error")
+        }
+    }
+
+    private fun failTransfer(transferId: String, message: String) =
+        send(Codec.encode(MsgType.FS_DONE, FsDone(transferId, ok = false, error = message)))
 
     /** The Mac went away: drop photos that were never sent. */
     fun onDisconnect() {
@@ -101,10 +122,17 @@ class MmsHandlers(
             return
         }
         val images = files.filterNotNull()
+        val own = ownNumber()?.let(::normalize)?.takeIf { it.isNotEmpty() }
+        val to = req.addresses.filter { normalize(it) != own }
         sends {
-            sender.send(req.requestId, req.addresses, req.text?.takeIf { it.isNotEmpty() }, images) { ok, error ->
+            guarded({
                 images.forEach(File::delete)
-                reply(req.requestId, ok, error)
+                reply(req.requestId, false, it)
+            }) {
+                sender.send(req.requestId, to, req.text?.takeIf { it.isNotEmpty() }, images) { ok, error ->
+                    images.forEach(File::delete)
+                    reply(req.requestId, ok, error)
+                }
             }
         }
     }

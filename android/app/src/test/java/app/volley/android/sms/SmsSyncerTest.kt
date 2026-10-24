@@ -213,4 +213,16 @@ class SmsSyncerTest {
             received,
         )
     }
+
+    @Test
+    fun olderMacWithoutMmsCursorGetsNoMms() {
+        source.rows = listOf(row(1))
+        mms.rows = listOf(mmsRow(1))
+        syncer.syncFrom(0, 0, sinceMmsId = null)
+        assertEquals(listOf("sms"), batches.single().messages.map { it.kind })
+        frames.clear()
+        mms.rows += mmsRow(2)
+        syncer.onChanged()
+        assertTrue(frames.isEmpty())
+    }
 }
