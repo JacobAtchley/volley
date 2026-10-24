@@ -1,6 +1,8 @@
 package app.volley.android.sms
 
 import app.volley.android.protocol.Codec
+import app.volley.android.protocol.MmsReceived
+import app.volley.android.protocol.MsgType
 import app.volley.android.protocol.SmsBatch
 import app.volley.android.protocol.bodyAs
 import org.junit.Assert.assertEquals
@@ -15,15 +17,29 @@ class SmsSyncerTest {
         override fun byIds(ids: Collection<Long>) = rows.filter { it.id in ids }.sortedBy { it.id }
     }
 
+    private class FakeMms(var rows: List<MmsRow> = emptyList()) : MmsSourceApi {
+        override fun since(sinceId: Long, sinceTimeSec: Long) =
+            rows.filter { it.id > sinceId && it.date >= sinceTimeSec }.sortedBy { it.id }
+        override fun byIds(ids: Collection<Long>) = rows.filter { it.id in ids }.sortedBy { it.id }
+        override fun addrs(id: Long) = listOf(MmsAddr("+1555", 137), MmsAddr("+1777", 151), MmsAddr("+1999", 151))
+        override fun parts(id: Long) = listOf(MmsPart(id * 10, "text/plain", null, "g$id", 2))
+    }
+
     private val source = FakeSource()
+    private val mms = FakeMms()
     private val lookups = mutableListOf<String>()
     private val names = ContactNames {
         lookups += it
         if (it == "+1555") "Ana" else null
     }
     private val frames = mutableListOf<String>()
-    private val syncer = SmsSyncer(source, names) { frames += it }
-    private val batches get() = frames.map { Codec.decode(it)!!.bodyAs<SmsBatch>()!! }
+    private val syncer = SmsSyncer(source, names, mms = mms, ownNumber = { "+1777" }) { frames += it }
+    private val envelopes get() = frames.map { Codec.decode(it)!! }
+    private val batches get() = envelopes.filter { it.type == MsgType.SMS_BATCH }.map { it.bodyAs<SmsBatch>()!! }
+    private val received get() = envelopes.filter { it.type == MsgType.MMS_RECEIVED }.map { it.bodyAs<MmsReceived>()!! }
+
+    private fun mmsRow(id: Long, box: Int = 1, mType: Int = 132, dateSec: Long = 2) =
+        MmsRow(id, threadId = 9, date = dateSec, box = box, mType = mType)
 
     private fun row(id: Long, type: Int = 1, date: Long = 2_000, address: String = "+1555") =
         SmsRow(id, threadId = 1, address = address, body = "m$id", date = date, type = type)
@@ -131,5 +147,70 @@ class SmsSyncerTest {
         source.rows = listOf(row(5, type = 5))
         syncer.onChanged()
         assertEquals(listOf(5L to "failed"), batches.single().messages.map { it.id to it.status })
+    }
+
+    @Test
+    fun syncFromMergesSmsAndMmsByCursor() {
+        source.rows = listOf(row(1), row(2))
+        mms.rows = listOf(mmsRow(1), mmsRow(5), mmsRow(6, dateSec = 0))
+        syncer.syncFrom(1, 1_000, sinceMmsId = 1)
+        assertEquals(listOf("sms" to 2L, "mms" to 5L), batches.single().messages.map { it.kind to it.id })
+        frames.clear()
+        source.rows += row(3)
+        mms.rows += mmsRow(8)
+        syncer.onChanged()
+        assertEquals(listOf("sms" to 3L, "mms" to 8L), batches.single().messages.map { it.kind to it.id })
+    }
+
+    @Test
+    fun mmsPendingResentWhenSettled() {
+        mms.rows = listOf(mmsRow(4, box = 4, mType = 128), mmsRow(2, box = 4, mType = 128))
+        syncer.syncFrom(0, 0, sinceMmsId = 3, macPendingMmsIds = listOf(2))
+        frames.clear()
+        mms.rows = listOf(mmsRow(4, box = 2, mType = 128), mmsRow(2, box = 5, mType = 128))
+        syncer.onChanged()
+        assertEquals(
+            listOf(2L to "failed", 4L to "sent"),
+            batches.single().messages.map {
+                it.id to it.status
+            }.sortedBy { it.first },
+        )
+        frames.clear()
+        syncer.onChanged()
+        assertTrue(frames.isEmpty())
+    }
+
+    @Test
+    fun downloadingMmsIsSentOnceRetrieved() {
+        mms.rows = listOf(mmsRow(3, mType = 130))
+        syncer.syncFrom(0, 0)
+        assertTrue(batches.single().messages.isEmpty())
+        frames.clear()
+        mms.rows = listOf(mmsRow(3), mmsRow(4, mType = 130))
+        syncer.onChanged()
+        assertEquals(listOf(3L), batches.single().messages.map { it.id })
+        assertEquals(listOf("g3"), received.map { it.text })
+    }
+
+    @Test
+    fun newIncomingMmsRaisesReceivedButSyncDoesNot() {
+        mms.rows = listOf(mmsRow(1))
+        syncer.syncFrom(0, 0)
+        assertTrue(received.isEmpty())
+        mms.rows += listOf(mmsRow(2), mmsRow(3, box = 2, mType = 128))
+        syncer.onChanged()
+        assertEquals(
+            listOf(
+                MmsReceived(
+                    threadId = 9,
+                    sender = "+1555",
+                    senderName = "Ana",
+                    title = "Ana, +1999",
+                    text = "g2",
+                    hasPhoto = false,
+                ),
+            ),
+            received,
+        )
     }
 }

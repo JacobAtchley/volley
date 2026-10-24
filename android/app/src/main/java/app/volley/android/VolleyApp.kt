@@ -14,6 +14,8 @@ import app.volley.android.protocol.bodyAs
 import app.volley.android.session.PairingStore
 import app.volley.android.session.SessionManager
 import app.volley.android.session.SessionState
+import app.volley.android.sms.AndroidOwnNumber
+import app.volley.android.sms.ContentResolverMmsSource
 import app.volley.android.sms.ContentResolverSmsSource
 import app.volley.android.sms.PhoneLookupContactNames
 import app.volley.android.sms.SmsObserver
@@ -71,9 +73,13 @@ class AppGraph(context: Context) {
         it.on(MsgType.SMS_SEND, SmsSendHandler(SystemSmsSender(context), it))
     }
 
+    private val mmsSource = ContentResolverMmsSource(context.contentResolver)
+    private val ownNumber = AndroidOwnNumber(context, mmsSource)
     private val syncer = SmsSyncer(
         source = ContentResolverSmsSource(context.contentResolver),
         names = PhoneLookupContactNames(context.contentResolver),
+        mms = mmsSource,
+        ownNumber = ownNumber::get,
         send = { session.send(it) },
     )
     private val smsObserver = SmsObserver(context.contentResolver, scope) { syncer.onChanged() }

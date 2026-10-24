@@ -11,7 +11,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** Watches the SMS provider and calls [onChange] once things settle (debounced). */
+/** Watches the SMS and MMS providers and calls [onChange] once things settle (debounced). */
 class SmsObserver(
     private val resolver: ContentResolver,
     private val scope: CoroutineScope,
@@ -38,6 +38,7 @@ class SmsObserver(
         if (registered) return
         registered = try {
             resolver.registerContentObserver(Telephony.Sms.CONTENT_URI, true, observer)
+            resolver.registerContentObserver(Telephony.Mms.CONTENT_URI, true, observer)
             true
         } catch (e: SecurityException) {
             false

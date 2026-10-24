@@ -100,6 +100,7 @@ private fun VolleyScreen() {
 
     var smsGranted by remember { mutableStateOf(false) }
     var contactsGranted by remember { mutableStateOf(false) }
+    var phoneNumberGranted by remember { mutableStateOf(false) }
     var filesGranted by remember { mutableStateOf(false) }
     var listenerEnabled by remember { mutableStateOf(false) }
     LifecycleResumeEffect(Unit) {
@@ -110,6 +111,8 @@ private fun VolleyScreen() {
         graph.refreshFileAccess()
         contactsGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) ==
             PackageManager.PERMISSION_GRANTED
+        phoneNumberGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_NUMBERS) ==
+            PackageManager.PERMISSION_GRANTED
         listenerEnabled = context.packageName in NotificationManagerCompat.getEnabledListenerPackages(context)
         onPauseOrDispose { }
     }
@@ -118,6 +121,9 @@ private fun VolleyScreen() {
     }
     val contactsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         contactsGranted = it
+    }
+    val phoneNumberLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        phoneNumberGranted = it
     }
     val legacyFilesLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -143,6 +149,10 @@ private fun VolleyScreen() {
         Section("Permissions") {
             PermissionRow("Text messages", smsGranted) { smsLauncher.launch(SMS_PERMISSIONS) }
             PermissionRow("Contacts", contactsGranted) { contactsLauncher.launch(Manifest.permission.READ_CONTACTS) }
+            // Keeps this phone out of group replies.
+            PermissionRow("Phone number", phoneNumberGranted) {
+                phoneNumberLauncher.launch(Manifest.permission.READ_PHONE_NUMBERS)
+            }
             PermissionRow("All files access", filesGranted) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     context.startActivity(
