@@ -7,6 +7,9 @@ import app.volley.android.files.AndroidFiles
 import app.volley.android.files.DiskFileService
 import app.volley.android.files.FileHandlers
 import app.volley.android.files.StoragePaths
+import app.volley.android.mms.AndroidMmsParts
+import app.volley.android.mms.MmsHandlers
+import app.volley.android.mms.MmsSender
 import app.volley.android.notifications.ExcludedPackages
 import app.volley.android.protocol.MsgType
 import app.volley.android.protocol.NotificationFilter
@@ -14,6 +17,8 @@ import app.volley.android.protocol.bodyAs
 import app.volley.android.session.PairingStore
 import app.volley.android.session.SessionManager
 import app.volley.android.session.SessionState
+import app.volley.android.sms.AndroidOwnNumber
+import app.volley.android.sms.ContentResolverMmsSource
 import app.volley.android.sms.ContentResolverSmsSource
 import app.volley.android.sms.PhoneLookupContactNames
 import app.volley.android.sms.SmsObserver
@@ -30,6 +35,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import java.io.File
+import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy
@@ -71,9 +78,13 @@ class AppGraph(context: Context) {
         it.on(MsgType.SMS_SEND, SmsSendHandler(SystemSmsSender(context), it))
     }
 
+    private val mmsSource = ContentResolverMmsSource(context.contentResolver)
+    private val ownNumber = AndroidOwnNumber(context, mmsSource)
     private val syncer = SmsSyncer(
         source = ContentResolverSmsSource(context.contentResolver),
         names = PhoneLookupContactNames(context.contentResolver),
+        mms = mmsSource,
+        ownNumber = ownNumber::get,
         send = { session.send(it) },
     )
     private val smsObserver = SmsObserver(context.contentResolver, scope) { syncer.onChanged() }
@@ -101,6 +112,17 @@ class AppGraph(context: Context) {
             DiscardOldestPolicy(),
         )::execute,
     )
+    private val mmsHandlers = MmsHandlers(
+        parts = AndroidMmsParts(context.contentResolver),
+        transfers = fileHandlers,
+        sender = MmsSender(context),
+        attachDir = File(context.cacheDir, "mms-out"),
+        send = { session.send(it) },
+        // Like file thumbnails: one worker, newest requests win while scrolling.
+        thumbs = ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS, LinkedBlockingQueue(64), DiscardOldestPolicy())::execute,
+        sends = Executors.newSingleThreadExecutor()::execute,
+        ownNumber = ownNumber::get,
+    )
     private var lastFileAccess: Boolean? = null
 
     /** Tells the Mac if All files access changed (call when returning from the permission screen). */
@@ -112,6 +134,7 @@ class AppGraph(context: Context) {
     init {
         fileHandlers.types.forEach { type -> session.on(type) { fileHandlers.handle(it) } }
         session.onBinary = fileHandlers::onBinary
+        mmsHandlers.types.forEach { type -> session.on(type) { mmsHandlers.handle(it) } }
         session.on(MsgType.SMS_SYNC, SmsSyncHandler(syncer))
         session.on(MsgType.NOTIFICATION_FILTER) { env ->
             env.bodyAs<NotificationFilter>()?.let { excludedPackages.set(it.excludedPackages.toSet()) }
@@ -129,6 +152,7 @@ class AppGraph(context: Context) {
                     statusReporter.stop()
                     syncer.reset()
                     fileHandlers.onDisconnect()
+                    mmsHandlers.onDisconnect()
                 }
             }
         }

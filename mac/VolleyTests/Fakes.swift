@@ -41,11 +41,13 @@ final class FakeTrust: TrustStore {
 }
 
 final class FakeNotifier: DesktopNotifier {
-    var onReply: (@MainActor (String, String) -> Void)?
+    var onReply: (@MainActor (String, Int64?, String) -> Void)?
     var onDismiss: (@MainActor (String) -> Void)?
-    var onOpen: (@MainActor (String) -> Void)?
+    var onOpen: (@MainActor (String, Int64?) -> Void)?
     func requestAuthorization() {}
     func showSms(from address: String, body: String) {}
+    private(set) var mms: [MmsReceived] = []
+    func showMms(_ m: MmsReceived) { mms.append(m) }
     private(set) var shown: [MirroredNotification] = []
     func showNotification(_ n: MirroredNotification) { shown.append(n) }
     func removeNotification(key: String) {}
@@ -55,4 +57,12 @@ func sms(_ id: Int64, thread: Int64 = 1, address: String = "+1555", name: String
          date: Int64 = 1_000, outgoing: Bool = false, status: String = "received") -> SmsRecord {
     SmsRecord(id: id, threadId: thread, address: address, contactName: name, body: body, date: date,
               outgoing: outgoing, status: status)
+}
+
+func mms(_ id: Int64, thread: Int64 = 1, address: String = "+1555", name: String? = nil, body: String = "hi",
+         date: Int64 = 1_000, outgoing: Bool = false, status: String = "received",
+         participants: [Participant] = [Participant(address: "+1555")], attachments: [Attachment] = []) -> SmsRecord {
+    SmsRecord(id: id, threadId: thread, address: address, contactName: name, body: body, date: date,
+              outgoing: outgoing, status: status, kind: "mms", participants: participants,
+              sender: outgoing ? nil : address, attachments: attachments)
 }

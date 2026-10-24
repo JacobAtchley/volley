@@ -14,6 +14,22 @@ final class ProtocolTests: XCTestCase {
                                                   body: "hi", date: 1000, outgoing: false, status: "received")])
     }
 
+    func testDecodesMmsRecord() throws {
+        let json = """
+        {"type":"sms.batch","id":"x","ts":1,"body":{"done":true,"messages":[
+          {"id":9,"threadId":4,"address":"+1555","body":"","date":1000,"outgoing":false,"status":"received",
+           "kind":"mms","sender":"+1555","participants":[{"address":"+1555","contactName":"Ana"},{"address":"+1777"}],
+           "attachments":[{"partId":70,"mime":"image/jpeg","size":5000}]}
+        ]}}
+        """
+        let record = try XCTUnwrap(Codec.body(SmsBatch.self, from: Data(json.utf8))?.messages.first)
+        XCTAssertEqual(record.kind, "mms")
+        XCTAssertEqual(record.sender, "+1555")
+        XCTAssertEqual(record.participants, [Participant(address: "+1555", contactName: "Ana"),
+                                             Participant(address: "+1777")])
+        XCTAssertEqual(record.attachments, [Attachment(partId: 70, mime: "image/jpeg", size: 5000)])
+    }
+
     func testEncodesSmsSyncBody() throws {
         let data = try XCTUnwrap(Codec.encode(MsgType.smsSync, SmsSync(sinceId: 42, sinceTime: 1000)))
         let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])

@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.ContactsContract.PhoneLookup
 import android.provider.Telephony.Sms
 import app.volley.android.protocol.Codec
+import app.volley.android.protocol.MmsReceived
 import app.volley.android.protocol.MsgType
 import app.volley.android.protocol.SmsBatch
 import app.volley.android.protocol.SmsRecord
@@ -44,25 +45,53 @@ fun interface ContactNames {
 }
 
 /**
- * Answers the Mac's `sms.sync` and then streams changes as `sms.batch` frames.
+ * Answers the Mac's `sms.sync` and then streams changes as `sms.batch` frames, SMS and MMS each with its own cursor.
  * Nothing is sent on change until the Mac has asked for a sync, so we never guess its cursor.
  */
-class SmsSyncer(private val source: SmsSource, private val names: ContactNames, private val send: (String) -> Unit) {
+class SmsSyncer(
+    private val source: SmsSource,
+    private val names: ContactNames,
+    private val mms: MmsSourceApi = NoMms,
+    private val ownNumber: () -> String? = { null },
+    private val send: (String) -> Unit,
+) {
     private var cursor: Long? = null
     private var floor = 0L
     private var pendingIds = emptySet<Long>()
+    private var mmsCursor = 0L
+
+    /** Only Macs that send a MMS cursor understand MMS records. */
+    private var mmsWanted = false
+    private var mmsFloorSec = 0L
+
+    /** Pending MMS plus ones still downloading (m_type 130), watched until they settle. */
+    private var mmsWaiting = emptySet<Long>()
 
     /** [macPendingIds] are rows the Mac holds as pending; they're resent so it learns how they settled. */
     @Synchronized
-    fun syncFrom(sinceId: Long, sinceTime: Long, macPendingIds: Collection<Long> = emptyList()) {
+    fun syncFrom(
+        sinceId: Long,
+        sinceTime: Long,
+        macPendingIds: Collection<Long> = emptyList(),
+        sinceMmsId: Long? = 0,
+        macPendingMmsIds: Collection<Long> = emptyList(),
+    ) {
+        mmsWanted = sinceMmsId != null
+        val mmsSince = sinceMmsId ?: 0
         val fresh = toRecords(source.since(sinceId, sinceTime))
         val old = toRecords(source.byIds(macPendingIds.filter { it <= sinceId }))
-        val records = old + fresh
+        val mmsFresh = if (mmsWanted) mms.since(mmsSince, sinceTime / 1000) else emptyList()
+        val mmsRows = if (mmsWanted) mms.byIds(macPendingMmsIds.filter { it <= mmsSince }) + mmsFresh else emptyList()
+        val mmsRecords = toMmsRecords(mmsRows)
+        val records = old + fresh + mmsRecords
         val chunks = records.chunked(CHUNK).ifEmpty { listOf(emptyList()) }
         chunks.forEachIndexed { i, chunk -> sendBatch(chunk, done = i == chunks.lastIndex) }
         cursor = maxOf(sinceId, fresh.maxOfOrNull { it.id } ?: 0)
         floor = sinceTime
-        pendingIds = records.pendingIds()
+        pendingIds = (old + fresh).pendingIds()
+        mmsCursor = maxOf(mmsSince, mmsFresh.maxOfOrNull { it.id } ?: 0)
+        mmsFloorSec = sinceTime / 1000
+        mmsWaiting = waiting(mmsRows, mmsRecords)
     }
 
     @Synchronized
@@ -70,16 +99,28 @@ class SmsSyncer(private val source: SmsSource, private val names: ContactNames, 
         val from = cursor ?: return
         val fresh = toRecords(source.since(from, floor))
         val settled = toRecords(source.byIds(pendingIds)).filter { it.status != PENDING }
-        if (fresh.isEmpty() && settled.isEmpty()) return
-        sendBatch(settled + fresh, done = true)
+        val mmsFreshRows = if (mmsWanted) mms.since(mmsCursor, mmsFloorSec) else emptyList()
+        val mmsFresh = toMmsRecords(mmsFreshRows)
+        val mmsSettled = toMmsRecords(mms.byIds(mmsWaiting)).filter { it.status != PENDING }
+        val records = settled + fresh + mmsSettled + mmsFresh
+        if (records.isEmpty()) {
+            mmsCursor = maxOf(mmsCursor, mmsFreshRows.maxOfOrNull { it.id } ?: 0)
+            mmsWaiting = mmsWaiting + waiting(mmsFreshRows, mmsFresh)
+            return
+        }
+        sendBatch(records, done = true)
+        (mmsSettled + mmsFresh).filter { !it.outgoing }.forEach(::sendReceived)
         cursor = maxOf(from, fresh.maxOfOrNull { it.id } ?: 0)
         pendingIds = pendingIds - settled.map { it.id }.toSet() + fresh.pendingIds()
+        mmsCursor = maxOf(mmsCursor, mmsFreshRows.maxOfOrNull { it.id } ?: 0)
+        mmsWaiting = mmsWaiting - mmsSettled.map { it.id }.toSet() + waiting(mmsFreshRows, mmsFresh)
     }
 
     @Synchronized
     fun reset() {
         cursor = null
         pendingIds = emptySet()
+        mmsWaiting = emptySet()
     }
 
     private fun toRecords(rows: List<SmsRow>): List<SmsRecord> {
@@ -87,15 +128,45 @@ class SmsSyncer(private val source: SmsSource, private val names: ContactNames, 
         return rows.mapNotNull { row -> row.toRecord(cache.getOrPut(row.address) { names.lookup(row.address) }) }
     }
 
+    private fun toMmsRecords(rows: List<MmsRow>): List<SmsRecord> {
+        if (rows.isEmpty()) return emptyList()
+        val own = ownNumber()
+        return rows.mapNotNull { row -> row.toRecord(mms.addrs(row.id), mms.parts(row.id), own, names) }
+    }
+
+    private fun waiting(rows: List<MmsRow>, records: List<SmsRecord>) =
+        rows.filter { it.mType == M_NOTIFICATION_IND }.map { it.id }.toSet() + records.pendingIds()
+
     private fun List<SmsRecord>.pendingIds() = filter { it.status == PENDING }.map { it.id }.toSet()
 
     private fun sendBatch(records: List<SmsRecord>, done: Boolean) =
         send(Codec.encode(MsgType.SMS_BATCH, SmsBatch(records, done)))
 
+    private fun sendReceived(record: SmsRecord) = send(
+        Codec.encode(
+            MsgType.MMS_RECEIVED,
+            MmsReceived(
+                threadId = record.threadId,
+                sender = record.address,
+                senderName = record.contactName,
+                title = conversationTitle(record.participants),
+                text = record.body,
+                hasPhoto = record.attachments.any { it.mime.startsWith("image/") },
+            ),
+        ),
+    )
+
     private companion object {
         const val CHUNK = 200
         const val PENDING = "pending"
     }
+}
+
+private object NoMms : MmsSourceApi {
+    override fun since(sinceId: Long, sinceTimeSec: Long) = emptyList<MmsRow>()
+    override fun byIds(ids: Collection<Long>) = emptyList<MmsRow>()
+    override fun addrs(id: Long) = emptyList<MmsAddr>()
+    override fun parts(id: Long) = emptyList<MmsPart>()
 }
 
 /** [SmsSource] backed by the system SMS provider. Returns nothing without READ_SMS. */

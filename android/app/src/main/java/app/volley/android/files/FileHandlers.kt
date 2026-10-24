@@ -20,9 +20,20 @@ import app.volley.android.protocol.FsUpload
 import app.volley.android.protocol.FsUploadReady
 import app.volley.android.protocol.MsgType
 import app.volley.android.protocol.bodyAs
+import java.io.InputStream
+import java.io.OutputStream
 import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+
+/** Transfers over the chunked flow for sources other than the file system (MMS parts and attachments). */
+interface Transfers {
+    /** Sends [input] to the Mac as a download: `fs.begin`, chunks paced by `file.ack`, `fs.end`. */
+    fun downloadStream(transferId: String, name: String, size: Long, input: InputStream)
+
+    /** Receives an upload into [output] and answers `fs.uploadReady`; [onDone] is true once it's verified. */
+    fun receiveUpload(transferId: String, finalName: String, output: OutputStream, onDone: (Boolean) -> Unit)
+}
 
 /**
  * Answers the Mac's `fs.*` requests and runs file transfers in both directions. Everything runs on the
@@ -37,13 +48,16 @@ class FileHandlers(
     private val scan: (String) -> Unit = {},
     private val chunk: Int = ChunkFrame.CHUNK,
     private val background: (Runnable) -> Unit = { it.run() },
-) {
+) : Transfers {
     private val registry = TransferRegistry()
     private val endSent = ConcurrentHashMap.newKeySet<UUID>()
 
     /** Upload id → path being written, so cancels and disconnects can delete partial files. */
     private val uploads = ConcurrentHashMap<UUID, String>()
     private val activeIds = ConcurrentHashMap.newKeySet<UUID>()
+
+    /** Uploads started through [receiveUpload], told whether they arrived intact. */
+    private val uploadDone = ConcurrentHashMap<UUID, (Boolean) -> Unit>()
 
     /** The id exactly as the Mac wrote it; Swift's uppercase form must come back unchanged. */
     private val wireIds = ConcurrentHashMap<UUID, String>()
@@ -100,6 +114,8 @@ class FileHandlers(
         activeIds.forEach(::closeStreams)
         uploads.values.forEach(files::discard)
         uploads.clear()
+        uploadDone.values.forEach { it(false) }
+        uploadDone.clear()
         registry.clear()
         endSent.clear()
         wireIds.clear()
@@ -156,11 +172,32 @@ class FileHandlers(
             send(Codec.encode(MsgType.FS_DONE, FsDone(req.transferId, ok = false, error = it.message)))
             return
         }
-        started(id, req.transferId)
-        send(Codec.encode(MsgType.FS_BEGIN, FsBegin(req.transferId, size, req.path.substringAfterLast('/'))))
+        startDownload(id, req.transferId, req.path.substringAfterLast('/'), size, input)
+    }
+
+    override fun downloadStream(transferId: String, name: String, size: Long, input: InputStream) {
+        val id = uuid(transferId) ?: return input.close()
+        startDownload(id, transferId, name, size, input)
+    }
+
+    private fun startDownload(id: UUID, wireId: String, name: String, size: Long, input: InputStream) {
+        started(id, wireId)
+        send(Codec.encode(MsgType.FS_BEGIN, FsBegin(wireId, size, name)))
         val sender = ChunkSender(id, input, sendBinary, chunk = chunk)
         registry.add(sender)
         pump(sender)
+    }
+
+    override fun receiveUpload(transferId: String, finalName: String, output: OutputStream, onDone: (Boolean) -> Unit) {
+        val id = uuid(transferId) ?: return onDone(false).also { output.close() }
+        started(id, transferId)
+        uploadDone[id] = onDone
+        registry.add(
+            ChunkReceiver(id, output) { received ->
+                send(Codec.encode(MsgType.FILE_ACK, FileAck(transferId, received)))
+            },
+        )
+        send(Codec.encode(MsgType.FS_UPLOAD_READY, FsUploadReady(transferId, finalName)))
     }
 
     private fun upload(req: FsUpload) {
@@ -199,6 +236,7 @@ class FileHandlers(
         val path = uploads.remove(id)
         val ok = receiver.finish(req.sha256)
         if (ok) path?.let(scan) else path?.let(files::discard)
+        uploadDone.remove(id)?.invoke(ok)
         val error = if (ok) null else "Checksum mismatch"
         send(Codec.encode(MsgType.FS_DONE, FsDone(req.transferId, ok, error)))
         finished(id)
@@ -207,6 +245,7 @@ class FileHandlers(
     private fun cancel(id: UUID) {
         uploads.remove(id)?.let(files::discard)
         finished(id)
+        uploadDone.remove(id)?.invoke(false)
     }
 
     private fun started(id: UUID, wireId: String) {

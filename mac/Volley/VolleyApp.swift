@@ -49,9 +49,9 @@ enum Composition {
         session.onFileMessage = { files.handle(type: $0, data: $1) }
         session.onBinary = { files.handleBinary($0) }
         session.onDisconnect = { files.disconnected() }
-        notifier.onOpen = { [weak session] address in
+        notifier.onOpen = { [weak session] address, threadId in
             guard let session else { return }
-            MainWindow.show(session: session, threadId: session.threadId(forAddress: address))
+            MainWindow.show(session: session, threadId: threadId ?? session.threadId(forAddress: address))
         }
         // Unit tests host the app; don't advertise or listen while they run.
         if !isTestHost { session.start() }

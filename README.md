@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/Android-8%2B-FF9E8F?labelColor=2A1F1D" alt="Android 8+">
 </p>
 
-<p align="center">💬 Read &amp; reply to SMS · 🔔 Notification history · 🔋 Phone status</p>
+<p align="center">💬 Texts, group chats &amp; photos · 🔔 Notification history · 🔋 Phone status</p>
 
 <p align="center">A menu bar app pairs with your phone over your Wi‑Fi. No cloud, no account.</p>
 
@@ -44,7 +44,10 @@ cd mac && xcodegen && open Volley.xcodeproj
 ```
 Run it, then click the arc icon in the menu bar and choose **Pair a phone**. Allow notifications and local network access when macOS asks.
 Choose **Open Volley** for the messages window: your phone's battery, charging, cell and Wi-Fi status,
-today's text conversations, and a chat view to reply. Messages are kept on the Mac in
+today's conversations (texts, MMS group chats and photos), and a chat view to reply. Group chats show who
+said what, and a reply goes to the whole group. Photos appear inline; click one to open it in Preview. Attach
+photos with the photo button or by dragging them into the chat; the phone shrinks them to fit the carrier's
+MMS size limit. Messages are kept on the Mac in
 `~/Library/Application Support/Volley/volley.sqlite`.
 The **Notifications** area keeps every notification the phone mirrors, marks what's new since you last
 looked, and has fuzzy search. Use **Mirrored Apps…** (or right-click → Don't Mirror) to stop mirroring apps
@@ -55,7 +58,8 @@ view and the sort order are remembered per folder; camera folders open newest fi
 
 **Android**
 Open `android/` in Android Studio and run on a device on the same Wi-Fi, or run `./gradlew installDebug`.
-In the app: grant **Text messages**, **Contacts**, **Notification access** and (for Files) **All files access**,
+In the app: grant **Text messages**, **Contacts**, **Phone number** (keeps your own number out of group
+replies), **Notification access** and (for Files) **All files access**,
 pick your Mac and enter the code.
 **Send test notification** posts one on demand so you can check mirroring end to end.
 
@@ -70,7 +74,12 @@ go to App info → ⋮ → **Allow restricted settings**.
 - Google Play only allows SMS permissions for default SMS apps, so for now the Android app has to be sideloaded.
 - Android only exposes notifications that are still showing, so one posted and cleared while the Mac was
   disconnected can't be recovered.
-- Only text SMS are mirrored; MMS (pictures, group chats) isn't yet. History starts from today when first synced.
+- History starts from today when first synced.
+- RCS ("chat features") messages aren't mirrored: Google Messages stores them as restricted, and Android hides
+  restricted messages from every app except the default messaging app. (The messaging app's own notifications
+  aren't mirrored either, since texts already arrive directly.)
+- A photo sent from the Mac reaches the recipient, but Android doesn't record it in the phone's message history
+  (Volley isn't the default messaging app), so Google Messages may show it as not sent.
 - Only one phone is connected at a time.
 - Files can't reach other apps' private storage (`Android/data`, `Android/obb`); only shared storage.
   Transfers don't resume after a disconnect, and folders copy to Finder via **Download to…** rather than drag.

@@ -44,6 +44,12 @@ object MsgType {
     const val FS_DELETE = "fs.delete"
     const val FS_DELETED = "fs.deleted"
     const val FS_STATUS = "fs.status"
+    const val MMS_RECEIVED = "mms.received"
+    const val MMS_THUMB = "mms.thumb"
+    const val MMS_THUMB_DATA = "mms.thumbData"
+    const val MMS_PART = "mms.part"
+    const val MMS_ATTACH = "mms.attach"
+    const val MMS_SEND = "mms.send"
 }
 
 @Serializable data class PairRequest(val deviceId: String, val deviceName: String, val code: String)
@@ -85,7 +91,15 @@ data class SmsSend(val requestId: String, val address: String, val body: String,
 
 @Serializable data class SmsSent(val requestId: String, val ok: Boolean, val error: String? = null)
 
-@Serializable data class SmsSync(val sinceId: Long, val sinceTime: Long, val pendingIds: List<Long> = emptyList())
+@Serializable
+data class SmsSync(
+    val sinceId: Long,
+    val sinceTime: Long,
+    val pendingIds: List<Long> = emptyList(),
+    /** Absent from Macs that predate MMS: they get no MMS, which they'd store over SMS with the same id. */
+    val sinceMmsId: Long? = null,
+    val pendingMmsIds: List<Long> = emptyList(),
+)
 
 @Serializable data class SmsBatch(val messages: List<SmsRecord>, val done: Boolean)
 
@@ -99,6 +113,36 @@ data class SmsRecord(
     val date: Long,
     val outgoing: Boolean,
     val status: String,
+    /** "sms" or "mms"; SMS and MMS ids overlap, so the Mac keys on both. */
+    val kind: String = "sms",
+    /** MMS only: everyone in the conversation except this phone. */
+    val participants: List<Participant> = emptyList(),
+    /** MMS only: who sent an incoming message. */
+    val sender: String? = null,
+    val attachments: List<Attachment> = emptyList(),
+)
+
+@Serializable data class Participant(val address: String, val contactName: String? = null)
+
+@Serializable
+data class Attachment(
+    val partId: Long,
+    val mime: String,
+    val name: String? = null,
+    val size: Long,
+    val width: Int? = null,
+    val height: Int? = null,
+)
+
+/** Drives the Mac's notification for an incoming MMS; storage still comes from `sms.batch`. */
+@Serializable
+data class MmsReceived(
+    val threadId: Long,
+    val sender: String,
+    val senderName: String? = null,
+    val title: String,
+    val text: String,
+    val hasPhoto: Boolean,
 )
 
 @Serializable
@@ -152,6 +196,26 @@ data class FsListing(
 @Serializable data class FsDeleted(val requestId: String, val failed: List<FsDeleteFailure> = emptyList())
 
 @Serializable data class FsStatus(val allFilesAccess: Boolean)
+
+@Serializable data class MmsThumb(val requestId: String, val partId: Long, val maxPx: Int = 320)
+
+@Serializable data class MmsThumbData(val requestId: String, val jpegBase64: String? = null, val error: String? = null)
+
+/** `mms.part`: download an MMS part over the chunked transfer (`fs.begin` … `fs.done`). */
+@Serializable data class MmsPartRequest(val transferId: String, val partId: Long)
+
+/** `mms.attach`: upload a photo for a later `mms.send`; answered with `fs.uploadReady`. */
+@Serializable data class MmsAttach(val transferId: String, val name: String, val size: Long)
+
+/** `mms.send`: [attachments] are transfer ids of finished `mms.attach` uploads. Answered with `sms.sent`. */
+@Serializable
+data class MmsSend(
+    val requestId: String,
+    val threadId: Long,
+    val addresses: List<String>,
+    val text: String? = null,
+    val attachments: List<String> = emptyList(),
+)
 
 object Codec {
     val json = Json {

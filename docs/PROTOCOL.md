@@ -30,15 +30,24 @@ The Mac is the server; the phone is the client.
 | `sms.received`         | phone → mac  | `address`, `body`, `receivedAt` |
 | `sms.send`             | mac → phone  | `requestId`, `address`, `body`, `threadId?` |
 | `sms.sent`             | phone → mac  | `requestId`, `ok`, `error?` |
-| `sms.sync`             | mac → phone  | `sinceId` (phone SMS `_id`, 0 if none), `sinceTime` (epoch ms), `pendingIds` (ids the Mac holds as pending) |
+| `sms.sync`             | mac → phone  | `sinceId` (phone SMS `_id`, 0 if none), `sinceTime` (epoch ms), `pendingIds` (ids the Mac holds as pending), `sinceMmsId`, `pendingMmsIds` (the same for MMS) |
 | `sms.batch`            | phone → mac  | `messages` (`[SmsRecord]`), `done` |
+| `mms.received`         | phone → mac  | `threadId`, `sender`, `senderName?`, `title` (conversation), `text`, `hasPhoto` |
+| `mms.thumb`            | mac → phone  | `requestId`, `partId`, `maxPx` (≤ 512) |
+| `mms.thumbData`        | phone → mac  | `requestId`, `jpegBase64?`, `error?` |
+| `mms.part`             | mac → phone  | `transferId`, `partId`: download the part over the file transfer (`fs.begin` … `fs.done`) |
+| `mms.attach`           | mac → phone  | `transferId`, `name`, `size`: upload a photo for a reply, like `fs.upload` (`fs.uploadReady`, chunks, `fs.end`, `fs.done`) |
+| `mms.send`             | mac → phone  | `requestId`, `threadId`, `addresses`, `text?`, `attachments` (transfer ids of finished `mms.attach`); answered with `sms.sent` |
 | `notification.filter`  | mac → phone  | `excludedPackages` (`[String]`) |
 | `notification.sync`    | mac → phone  | `sinceTime` (epoch ms) |
 | `notification.batch`   | phone → mac  | `notifications` (`[notification.posted body]`), `activeKeys` (`[String]`), `done` |
 | `device.status`        | phone → mac  | `battery` (0–100), `charging`, `cellLevel?` (0–4), `wifiLevel?` (0–4), `wifiConnected` |
 
-`SmsRecord`: `id` (phone SMS `_id`), `threadId`, `address`, `contactName?`, `body`, `date` (epoch ms),
-`outgoing`, `status` (`received` | `sent` | `pending` | `failed`). Text SMS only; MMS is not synced.
+`SmsRecord`: `id` (phone SMS or MMS `_id`), `threadId`, `address`, `contactName?`, `body`, `date` (epoch ms),
+`outgoing`, `status` (`received` | `sent` | `pending` | `failed`), `kind` (`sms` default | `mms`), and for MMS:
+`participants` (`[{address, contactName?}]`, everyone but this phone), `sender?` (incoming only) and `attachments`
+(`[{partId, mime, name?, size, width?, height?}]`). An MMS `body` is its text parts joined; `address` is the sender
+for incoming and the first participant for outgoing. SMS and MMS ids overlap, so records are keyed by `kind` + `id`.
 
 ## SMS history sync
 
@@ -48,7 +57,12 @@ The Mac is the server; the phone is the client.
    (an empty result is one empty `done` batch).
 3. While connected, the phone observes its SMS provider and sends further `sms.batch` frames (`done: true`)
    with new rows, plus rows previously sent as `pending` whose status has since changed.
-4. The Mac upserts records by (phone, `id`), so resending a row updates it.
+4. The Mac upserts records by (phone, `kind`, `id`), so resending a row updates it.
+
+MMS follow the same steps with their own cursor (`sinceMmsId`, `pendingMmsIds`). An incoming MMS that is still
+downloading is held back until it has been retrieved. For each new incoming MMS seen live, the phone also sends
+`mms.received` after the batch; the Mac uses it only for desktop notifications. MMS sent by another app (not the
+default SMS app) are delivered but may not show up in the provider, so the Mac keeps its own copy of those.
 
 When the phone sends an `sms.send`, Android records it in the provider's sent box (verified on a Galaxy S24 Ultra,
 Android 14+: `creator=app.volley.android`), so the Mac's copy comes back through step 3 and replaces its optimistic one.

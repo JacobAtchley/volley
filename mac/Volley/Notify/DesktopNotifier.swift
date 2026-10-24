@@ -3,20 +3,22 @@ import UserNotifications
 
 /// Shows mirrored SMS and notifications as native macOS notifications.
 protocol DesktopNotifier: AnyObject {
-    var onReply: (@MainActor (_ address: String, _ text: String) -> Void)? { get set }
+    /// `threadId` is set for MMS notifications: the reply goes to the whole thread (a group gets an MMS).
+    var onReply: (@MainActor (_ address: String, _ threadId: Int64?, _ text: String) -> Void)? { get set }
     var onDismiss: (@MainActor (_ key: String) -> Void)? { get set }
-    /// The user clicked an SMS notification itself (not an action button).
-    var onOpen: (@MainActor (_ address: String) -> Void)? { get set }
+    /// The user clicked a message notification itself (not an action button).
+    var onOpen: (@MainActor (_ address: String, _ threadId: Int64?) -> Void)? { get set }
     func requestAuthorization()
     func showSms(from address: String, body: String)
+    func showMms(_ m: MmsReceived)
     func showNotification(_ n: MirroredNotification)
     func removeNotification(key: String)
 }
 
 final class UserNotifier: NSObject, DesktopNotifier, UNUserNotificationCenterDelegate {
-    var onReply: (@MainActor (String, String) -> Void)?
+    var onReply: (@MainActor (String, Int64?, String) -> Void)?
     var onDismiss: (@MainActor (String) -> Void)?
-    var onOpen: (@MainActor (String) -> Void)?
+    var onOpen: (@MainActor (String, Int64?) -> Void)?
 
     private let center = UNUserNotificationCenter.current()
 
@@ -59,6 +61,19 @@ final class UserNotifier: NSObject, DesktopNotifier, UNUserNotificationCenterDel
         center.add(UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil))
     }
 
+    /// "Ana in Ana, Bob +2" for a group; the photo stays on the phone until the chat asks for it.
+    func showMms(_ m: MmsReceived) {
+        let who = m.senderName ?? m.sender
+        let c = UNMutableNotificationContent()
+        c.title = m.title == who || m.title.isEmpty ? who : "\(who) in \(m.title)"
+        c.body = m.text.isEmpty ? (m.hasPhoto ? "📷 Photo" : "MMS") : m.text
+        c.sound = .default
+        c.categoryIdentifier = ID.smsCategory
+        c.threadIdentifier = "thread:\(m.threadId)"
+        c.userInfo = ["address": m.sender, "threadId": m.threadId]
+        center.add(UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil))
+    }
+
     func showNotification(_ n: MirroredNotification) {
         let c = UNMutableNotificationContent()
         c.title = n.title.isEmpty ? n.appName : n.title
@@ -86,19 +101,20 @@ final class UserNotifier: NSObject, DesktopNotifier, UNUserNotificationCenterDel
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let info = response.notification.request.content.userInfo
+        let threadId = (info["threadId"] as? NSNumber)?.int64Value
         if response.actionIdentifier == ID.reply,
            let reply = response as? UNTextInputNotificationResponse,
            let address = info["address"] as? String {
             let text = reply.userText
             let handler = onReply
-            DispatchQueue.main.async { MainActor.assumeIsolated { handler?(address, text) } }
+            DispatchQueue.main.async { MainActor.assumeIsolated { handler?(address, threadId, text) } }
         } else if response.actionIdentifier == ID.dismiss, let key = info["key"] as? String {
             let handler = onDismiss
             DispatchQueue.main.async { MainActor.assumeIsolated { handler?(key) } }
         } else if response.actionIdentifier == UNNotificationDefaultActionIdentifier,
                   let address = info["address"] as? String {
             let handler = onOpen
-            DispatchQueue.main.async { MainActor.assumeIsolated { handler?(address) } }
+            DispatchQueue.main.async { MainActor.assumeIsolated { handler?(address, threadId) } }
         }
         completionHandler()
     }
