@@ -21,8 +21,8 @@ import java.util.concurrent.ConcurrentHashMap
  * the PDU is written to a private file and handed to the system MMS service, and the outcome arrives through
  * [MmsSentReceiver]. Works without Volley being the default SMS app; Android records the message as sent.
  */
-class MmsSender(private val context: Context) {
-    fun send(
+class MmsSender(private val context: Context) : MmsSending {
+    override fun send(
         requestId: String,
         to: List<String>,
         text: String?,

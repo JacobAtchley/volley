@@ -7,6 +7,9 @@ import app.volley.android.files.AndroidFiles
 import app.volley.android.files.DiskFileService
 import app.volley.android.files.FileHandlers
 import app.volley.android.files.StoragePaths
+import app.volley.android.mms.AndroidMmsParts
+import app.volley.android.mms.MmsHandlers
+import app.volley.android.mms.MmsSender
 import app.volley.android.notifications.ExcludedPackages
 import app.volley.android.protocol.MsgType
 import app.volley.android.protocol.NotificationFilter
@@ -32,6 +35,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import java.io.File
+import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy
@@ -107,6 +112,16 @@ class AppGraph(context: Context) {
             DiscardOldestPolicy(),
         )::execute,
     )
+    private val mmsHandlers = MmsHandlers(
+        parts = AndroidMmsParts(context.contentResolver),
+        transfers = fileHandlers,
+        sender = MmsSender(context),
+        attachDir = File(context.cacheDir, "mms-out"),
+        send = { session.send(it) },
+        // Like file thumbnails: one worker, newest requests win while scrolling.
+        thumbs = ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS, LinkedBlockingQueue(64), DiscardOldestPolicy())::execute,
+        sends = Executors.newSingleThreadExecutor()::execute,
+    )
     private var lastFileAccess: Boolean? = null
 
     /** Tells the Mac if All files access changed (call when returning from the permission screen). */
@@ -118,6 +133,7 @@ class AppGraph(context: Context) {
     init {
         fileHandlers.types.forEach { type -> session.on(type) { fileHandlers.handle(it) } }
         session.onBinary = fileHandlers::onBinary
+        mmsHandlers.types.forEach { type -> session.on(type) { mmsHandlers.handle(it) } }
         session.on(MsgType.SMS_SYNC, SmsSyncHandler(syncer))
         session.on(MsgType.NOTIFICATION_FILTER) { env ->
             env.bodyAs<NotificationFilter>()?.let { excludedPackages.set(it.excludedPackages.toSet()) }
@@ -135,6 +151,7 @@ class AppGraph(context: Context) {
                     statusReporter.stop()
                     syncer.reset()
                     fileHandlers.onDisconnect()
+                    mmsHandlers.onDisconnect()
                 }
             }
         }

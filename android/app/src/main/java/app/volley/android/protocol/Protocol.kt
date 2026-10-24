@@ -196,6 +196,26 @@ data class FsListing(
 
 @Serializable data class FsStatus(val allFilesAccess: Boolean)
 
+@Serializable data class MmsThumb(val requestId: String, val partId: Long, val maxPx: Int = 320)
+
+@Serializable data class MmsThumbData(val requestId: String, val jpegBase64: String? = null, val error: String? = null)
+
+/** `mms.part`: download an MMS part over the chunked transfer (`fs.begin` … `fs.done`). */
+@Serializable data class MmsPartRequest(val transferId: String, val partId: Long)
+
+/** `mms.attach`: upload a photo for a later `mms.send`; answered with `fs.uploadReady`. */
+@Serializable data class MmsAttach(val transferId: String, val name: String, val size: Long)
+
+/** `mms.send`: [attachments] are transfer ids of finished `mms.attach` uploads. Answered with `sms.sent`. */
+@Serializable
+data class MmsSend(
+    val requestId: String,
+    val threadId: Long,
+    val addresses: List<String>,
+    val text: String? = null,
+    val attachments: List<String> = emptyList(),
+)
+
 object Codec {
     val json = Json {
         ignoreUnknownKeys = true

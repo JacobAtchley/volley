@@ -33,6 +33,11 @@ The Mac is the server; the phone is the client.
 | `sms.sync`             | mac → phone  | `sinceId` (phone SMS `_id`, 0 if none), `sinceTime` (epoch ms), `pendingIds` (ids the Mac holds as pending), `sinceMmsId`, `pendingMmsIds` (the same for MMS) |
 | `sms.batch`            | phone → mac  | `messages` (`[SmsRecord]`), `done` |
 | `mms.received`         | phone → mac  | `threadId`, `sender`, `senderName?`, `title` (conversation), `text`, `hasPhoto` |
+| `mms.thumb`            | mac → phone  | `requestId`, `partId`, `maxPx` (≤ 512) |
+| `mms.thumbData`        | phone → mac  | `requestId`, `jpegBase64?`, `error?` |
+| `mms.part`             | mac → phone  | `transferId`, `partId`: download the part over the file transfer (`fs.begin` … `fs.done`) |
+| `mms.attach`           | mac → phone  | `transferId`, `name`, `size`: upload a photo for a reply, like `fs.upload` (`fs.uploadReady`, chunks, `fs.end`, `fs.done`) |
+| `mms.send`             | mac → phone  | `requestId`, `threadId`, `addresses`, `text?`, `attachments` (transfer ids of finished `mms.attach`); answered with `sms.sent` |
 | `notification.filter`  | mac → phone  | `excludedPackages` (`[String]`) |
 | `notification.sync`    | mac → phone  | `sinceTime` (epoch ms) |
 | `notification.batch`   | phone → mac  | `notifications` (`[notification.posted body]`), `activeKeys` (`[String]`), `done` |
