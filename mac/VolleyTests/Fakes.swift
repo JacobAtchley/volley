@@ -41,11 +41,13 @@ final class FakeTrust: TrustStore {
 }
 
 final class FakeNotifier: DesktopNotifier {
-    var onReply: (@MainActor (String, String) -> Void)?
+    var onReply: (@MainActor (String, Int64?, String) -> Void)?
     var onDismiss: (@MainActor (String) -> Void)?
-    var onOpen: (@MainActor (String) -> Void)?
+    var onOpen: (@MainActor (String, Int64?) -> Void)?
     func requestAuthorization() {}
     func showSms(from address: String, body: String) {}
+    private(set) var mms: [MmsReceived] = []
+    func showMms(_ m: MmsReceived) { mms.append(m) }
     private(set) var shown: [MirroredNotification] = []
     func showNotification(_ n: MirroredNotification) { shown.append(n) }
     func removeNotification(key: String) {}

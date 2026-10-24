@@ -82,6 +82,8 @@ protocol MessageStore: AnyObject {
     func conversations(deviceId: String) -> [ConversationSummary]
     func messages(deviceId: String, threadId: Int64) -> [StoredMessage]
     func threadId(deviceId: String, address: String) -> Int64?
+    /// Addresses of everyone in the thread (from its latest MMS); empty for SMS-only threads.
+    func participantAddresses(deviceId: String, threadId: Int64) -> [String]
     func saveStatus(_ status: DeviceStatus, deviceId: String, at: Date)
     func markSeen(deviceId: String, at: Date)
     func status(deviceId: String) -> StoredStatus?
@@ -352,6 +354,18 @@ final class GRDBMessageStore: MessageStore {
                 m.attachments = attachments[m.id] ?? []
                 return m
             }
+        } ?? []
+    }
+
+    func participantAddresses(deviceId: String, threadId: Int64) -> [String] {
+        read { db in
+            try String.fetchAll(db, sql: """
+                SELECT address FROM message_participants
+                WHERE device_id = ? AND kind = 'mms' AND phone_id = (
+                    SELECT phone_id FROM messages WHERE device_id = ? AND thread_id = ? AND kind = 'mms'
+                    ORDER BY date DESC LIMIT 1)
+                ORDER BY position
+                """, arguments: [deviceId, deviceId, threadId])
         } ?? []
     }
 

@@ -61,11 +61,7 @@ final class FileSession {
     @ObservationIgnored private var jobs: [UUID: Job] = [:]
     @ObservationIgnored private var active: Active?
 
-    private enum Job {
-        /// `then` gets the saved file, or nil if the download failed or was cancelled.
-        case download(remote: String, into: URL, then: ((URL?) -> Void)?)
-        case upload(local: URL, dir: String)
-    }
+    private typealias Job = TransferJob
 
     /// The transfer currently on the wire.
     private struct Active {
@@ -214,12 +210,6 @@ final class FileSession {
         }
     }
 
-    func openInDefaultApp(_ remote: String) {
-        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        enqueue(.download(remote: remote, into: tempDir, then: { [openURL] url in url.map(openURL) }),
-                name: (remote as NSString).lastPathComponent, size: 0, direction: .download)
-    }
-
     func cancel(_ id: UUID) {
         guard let index = transfers.firstIndex(where: { $0.id == id }) else { return }
         switch transfers[index].state {
@@ -235,10 +225,6 @@ final class FileSession {
         default:
             break
         }
-    }
-
-    func clearFinished() {
-        transfers.removeAll { $0.state != .queued && $0.state != .running }
     }
 
     // MARK: - Incoming
@@ -424,13 +410,17 @@ final class FileSession {
         case let .upload(local, dir):
             sent = link.sendMessage(MsgType.fsUpload, FsUpload(transferId: id, dir: dir, name: local.lastPathComponent,
                                                                size: Self.size(of: local)))
+        case let .mmsPart(partId, _, _):
+            sent = link.sendMessage(MsgType.mmsPart, MmsPartRequest(transferId: id, partId: partId))
+        case let .mmsAttach(local, _):
+            sent = link.sendMessage(MsgType.mmsAttach, MmsAttach(transferId: id, name: local.lastPathComponent,
+                                                                 size: Self.size(of: local)))
         }
         if !sent { fail("Phone offline") }
     }
 
     private func beginDownload(_ b: FsBegin) {
-        guard var current = active, isActive(b.transferId),
-              case let .download(_, dir, _) = jobs[current.id] else { return }
+        guard var current = active, isActive(b.transferId), let dir = jobs[current.id]?.downloadDir else { return }
         let url = finderStyleUniqueURL(in: dir, name: b.name)
         guard FileManager.default.createFile(atPath: url.path, contents: nil),
               let handle = try? FileHandle(forWritingTo: url) else {
@@ -450,7 +440,8 @@ final class FileSession {
 
     private func endDownload(_ e: FsEnd) {
         guard let current = active, isActive(e.transferId), let receiver = current.receiver,
-              case let .download(_, _, then) = jobs[current.id] else { return }
+              let job = jobs[current.id], job.downloadDir != nil else { return }
+        let then = job.downloadThen
         let ok = receiver.finish(expectedSha256: e.sha256)
         let reply = FsDone(transferId: e.transferId, ok: ok, error: ok ? nil : "Checksum mismatch")
         link.sendMessage(MsgType.fsDone, reply)
@@ -460,8 +451,7 @@ final class FileSession {
     }
 
     private func beginUpload(_ r: FsUploadReady) {
-        guard var current = active, isActive(r.transferId),
-              case let .upload(local, _) = jobs[current.id] else { return }
+        guard var current = active, isActive(r.transferId), let local = jobs[current.id]?.uploadSource else { return }
         guard let handle = try? FileHandle(forReadingFrom: local) else {
             return fail("Couldn't read \(local.lastPathComponent)")
         }
@@ -494,9 +484,13 @@ final class FileSession {
         guard let current = active, isActive(d.transferId) else { return }
         if d.ok {
             update(current.id) { $0.transferred = $0.size }
-            let dir: String? = if case let .upload(_, dir) = jobs[current.id] { dir } else { nil }
+            let job = jobs[current.id]
             succeed()
-            if let dir, dir == path { refresh() }
+            switch job {
+            case let .upload(_, dir) where dir == path: refresh()
+            case let .mmsAttach(_, then): then(current.id.uuidString)
+            default: break
+            }
         } else {
             fail(d.error ?? "Failed on phone")
         }
@@ -523,7 +517,11 @@ final class FileSession {
 
     /// Drops a job, telling a waiting download it won't produce a file.
     private func finishJob(_ id: UUID, url: URL?) {
-        if case let .download(_, _, then) = jobs.removeValue(forKey: id), url == nil { then?(nil) }
+        switch jobs.removeValue(forKey: id) {
+        case let .mmsAttach(_, then): then(nil)
+        case let job? where url == nil: job.downloadThen?(nil)
+        default: break
+        }
     }
 
     private func abandonActive(deletePartial: Bool) {
@@ -552,17 +550,40 @@ final class FileSession {
     }
 }
 
-/// Finder-style free name in `dir`: `photo.jpg` → `photo 2.jpg`, `README` → `README 2`.
-func finderStyleUniqueURL(in dir: URL, name: String) -> URL {
-    let first = dir.appendingPathComponent(name)
-    guard FileManager.default.fileExists(atPath: first.path) else { return first }
-    let dot = name.lastIndex(of: ".").flatMap { $0 == name.startIndex ? nil : $0 }
-    let base = dot.map { String(name[..<$0]) } ?? name
-    let ext = dot.map { String(name[$0...]) } ?? ""
-    var n = 2
-    while true {
-        let candidate = dir.appendingPathComponent("\(base) \(n)\(ext)")
-        if !FileManager.default.fileExists(atPath: candidate.path) { return candidate }
-        n += 1
+// MARK: - MMS
+
+extension FileSession {
+    func openInDefaultApp(_ remote: String) {
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        enqueue(.download(remote: remote, into: tempDir, then: { [openURL] url in url.map(openURL) }),
+                name: (remote as NSString).lastPathComponent, size: 0, direction: .download)
+    }
+
+    func clearFinished() {
+        transfers.removeAll { $0.state != .queued && $0.state != .running }
+    }
+
+    /// Downloads an MMS part to a temporary folder and opens it in the Mac's default app.
+    func openMmsPart(partId: Int64, name: String) {
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        enqueue(.mmsPart(partId: partId, into: tempDir, then: { [openURL] url in url.map(openURL) }),
+                name: name, size: 0, direction: .download)
+    }
+
+    /// Uploads photos for an MMS reply, one after another. `then` gets their transfer ids in order,
+    /// or nil if any of them failed.
+    func attachForMms(_ urls: [URL], then: @escaping ([String]?) -> Void) {
+        guard !urls.isEmpty else { return then([]) }
+        var ids = [String?](repeating: nil, count: urls.count)
+        var remaining = urls.count
+        var failed = false
+        for (i, url) in urls.enumerated() {
+            let job = Job.mmsAttach(local: url) { id in
+                if let id { ids[i] = id } else { failed = true }
+                remaining -= 1
+                if remaining == 0 { then(failed ? nil : ids.compactMap { $0 }) }
+            }
+            enqueue(job, name: url.lastPathComponent, size: Self.size(of: url), direction: .upload)
+        }
     }
 }

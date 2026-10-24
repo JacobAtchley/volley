@@ -23,6 +23,11 @@ struct ChatItem: Identifiable, Equatable {
     let date: Date
     let outgoing: Bool
     var state: State
+    /// Group chats: who sent an incoming message.
+    var sender: String?
+    var attachments: [StoredAttachment] = []
+    /// Photos of a send still in flight, shown from the Mac's copies.
+    var localImages: [URL] = []
 }
 
 /// A message sent from the Mac that the phone hasn't reported back yet. Kept in memory only.
@@ -33,6 +38,7 @@ private struct PendingSend {
     let body: String
     let date: Date
     var state: ChatItem.State
+    var images: [URL] = []
 }
 
 struct MirroredNotification: Identifiable {
@@ -74,6 +80,8 @@ final class PhoneSession: FileLink {
     private(set) var excludedApps: [AppRef] = []
     private(set) var pairedDevices: [PairedDevice] = []
     private(set) var pairingCode: String?
+    /// JPEG thumbnails of MMS photos by part id, fetched on demand.
+    private(set) var mmsThumbs: [Int64: Data] = [:]
 
     private let identity: MacIdentity
     private let transport: PhoneTransport
@@ -86,6 +94,8 @@ final class PhoneSession: FileLink {
     @ObservationIgnored private var unauthenticated = Set<ConnectionID>()
     @ObservationIgnored private var active: (conn: ConnectionID, deviceId: String)?
     @ObservationIgnored private var pendingSends: [PendingSend] = []
+    /// Thumbnail request id → part id.
+    @ObservationIgnored private var thumbRequests: [String: Int64] = [:]
     /// Binary frames from the authenticated phone (file chunks).
     @ObservationIgnored var onBinary: ((Data) -> Void)?
     /// The authenticated phone's connection closed (or it was unpaired).
@@ -118,9 +128,13 @@ final class PhoneSession: FileLink {
         refreshDevice()
 
         transport.onEvent = { [weak self] in self?.handle($0) }
-        notifier.onReply = { [weak self] address, text in
+        notifier.onReply = { [weak self] address, threadId, text in
             guard let self else { return }
-            self.sendSms(to: address, threadId: self.threadId(forAddress: address), body: text)
+            if let threadId {
+                self.sendMessage(threadId: threadId, text: text)
+            } else {
+                self.sendSms(to: address, threadId: self.threadId(forAddress: address), body: text)
+            }
         }
         notifier.onDismiss = { [weak self] key in self?.dismiss(key: key) }
     }
@@ -179,6 +193,49 @@ final class PhoneSession: FileLink {
         pendingSends.append(PendingSend(requestId: requestId, address: address, threadId: threadId, body: text,
                                         date: Date(), state: ok ? .sending : .failed))
         reloadThread()
+    }
+
+    /// Replies in a conversation: one-to-one text goes as SMS; a group, or anything with photos, as MMS to
+    /// everyone in the thread. Photos are uploaded to the phone first.
+    func sendMessage(threadId: Int64, text: String, attachments: [URL] = []) {
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty || !attachments.isEmpty, let deviceId = currentDevice?.id else { return }
+        let group = store.participantAddresses(deviceId: deviceId, threadId: threadId)
+        let address = conversations.first { $0.threadId == threadId }?.address ?? group.first
+        if attachments.isEmpty, group.count <= 1, let address {
+            return sendSms(to: address, threadId: threadId, body: body)
+        }
+        let recipients = group.isEmpty ? [address].compactMap { $0 } : group
+        guard !recipients.isEmpty else { return }
+        let requestId = UUID().uuidString
+        pendingSends.append(PendingSend(requestId: requestId, address: recipients[0], threadId: threadId, body: body,
+                                        date: Date(), state: .sending, images: attachments))
+        reloadThread()
+        let sendMms = { [weak self] (ids: [String]?) in
+            guard let self else { return }
+            guard let ids, self.send(MsgType.mmsSend, MmsSend(requestId: requestId, threadId: threadId,
+                                                             addresses: recipients, text: body.isEmpty ? nil : body,
+                                                             attachments: ids)) else {
+                return self.markSend(requestId, ok: false)
+            }
+        }
+        guard !attachments.isEmpty else { return sendMms([]) }
+        guard isConnected, let files else { return sendMms(nil) }
+        files.attachForMms(attachments, then: sendMms)
+    }
+
+    /// Asks the phone for a photo's thumbnail unless it's cached or already on its way.
+    func requestMmsThumb(partId: Int64) {
+        guard mmsThumbs[partId] == nil, !thumbRequests.values.contains(partId) else { return }
+        let requestId = UUID().uuidString
+        if send(MsgType.mmsThumb, MmsThumb(requestId: requestId, partId: partId, maxPx: 512)) {
+            thumbRequests[requestId] = partId
+        }
+    }
+
+    /// Downloads the full attachment and opens it in the Mac's default app.
+    func openAttachment(_ a: StoredAttachment) {
+        files?.openMmsPart(partId: a.partId, name: a.name ?? (a.isImage ? "photo.jpg" : "attachment"))
     }
 
     func dismiss(key: String) {
@@ -332,10 +389,8 @@ final class PhoneSession: FileLink {
             notifier.showSms(from: sms.address, body: sms.body)
 
         case MsgType.smsSent:
-            guard let r = Codec.body(SmsSent.self, from: data),
-                  let i = pendingSends.firstIndex(where: { $0.requestId == r.requestId }) else { return }
-            pendingSends[i].state = r.ok ? .delivered : .failed
-            reloadThread()
+            guard let r = Codec.body(SmsSent.self, from: data) else { return }
+            markSend(r.requestId, ok: r.ok)
 
         case MsgType.smsBatch:
             guard let batch = Codec.body(SmsBatch.self, from: data), let deviceId = active?.deviceId else { return }
@@ -349,7 +404,25 @@ final class PhoneSession: FileLink {
             reload()
 
         default:
-            if type.hasPrefix("fs.") || type == MsgType.fileAck { onFileMessage?(type, data) }
+            routeOther(type, data)
+        }
+    }
+
+    /// File transfers go to `FileSession`; MMS notifications and thumbnails are handled here.
+    private func routeOther(_ type: String, _ data: Data) {
+        if type.hasPrefix("fs.") || type == MsgType.fileAck { return onFileMessage?(type, data) ?? () }
+        switch type {
+        case MsgType.mmsReceived:
+            // Stored via sms.batch; this only drives the desktop notification.
+            guard let m = Codec.body(MmsReceived.self, from: data) else { return }
+            notifier.showMms(m)
+        case MsgType.mmsThumbData:
+            guard let t = Codec.body(MmsThumbData.self, from: data),
+                  let partId = thumbRequests.removeValue(forKey: t.requestId),
+                  let jpeg = t.jpegBase64.flatMap({ Data(base64Encoded: $0) }) else { return }
+            mmsThumbs[partId] = jpeg
+        default:
+            break
         }
     }
 
@@ -376,7 +449,9 @@ final class PhoneSession: FileLink {
         let midnight = Calendar.current.startOfDay(for: Date())
         _ = send(MsgType.smsSync, SmsSync(sinceId: store.lastPhoneId(deviceId: deviceId),
                                           sinceTime: Int64(midnight.timeIntervalSince1970 * 1000),
-                                          pendingIds: store.pendingPhoneIds(deviceId: deviceId)))
+                                          pendingIds: store.pendingPhoneIds(deviceId: deviceId),
+                                          sinceMmsId: store.lastPhoneId(deviceId: deviceId, kind: "mms"),
+                                          pendingMmsIds: store.pendingPhoneIds(deviceId: deviceId, kind: "mms")))
         _ = send(MsgType.notificationSync, NotificationSync(sinceTime: Int64(midnight.timeIntervalSince1970 * 1000)))
     }
 
@@ -452,14 +527,23 @@ final class PhoneSession: FileLink {
             openThread = []
             return
         }
+        let isGroup = conversations.first { $0.threadId == threadId }?.isGroup == true
         let stored = store.messages(deviceId: deviceId, threadId: threadId).map { m in
-            ChatItem(id: "p\(m.phoneId)", body: m.body, date: m.date, outgoing: m.outgoing,
-                     state: m.status == "failed" ? .failed : m.status == "pending" ? .sending : .delivered)
+            ChatItem(id: m.id, body: m.body, date: m.date, outgoing: m.outgoing,
+                     state: m.status == "failed" ? .failed : m.status == "pending" ? .sending : .delivered,
+                     sender: isGroup && !m.outgoing ? m.senderName ?? m.sender : nil, attachments: m.attachments)
         }
         let pending = pendingSends.filter { $0.threadId == threadId }.map {
-            ChatItem(id: $0.requestId, body: $0.body, date: $0.date, outgoing: true, state: $0.state)
+            ChatItem(id: $0.requestId, body: $0.body, date: $0.date, outgoing: true, state: $0.state,
+                     localImages: $0.images)
         }
         openThread = stored + pending
+    }
+
+    private func markSend(_ requestId: String, ok: Bool) {
+        guard let i = pendingSends.firstIndex(where: { $0.requestId == requestId }) else { return }
+        pendingSends[i].state = ok ? .delivered : .failed
+        reloadThread()
     }
 
     /// The phone stores what we sent and syncs it back; drop our in-memory copy once it arrives.
