@@ -24,6 +24,17 @@ build-mac:
     xcodebuild -project mac/Volley.xcodeproj -scheme Volley -configuration Debug \
         -derivedDataPath mac/build build
 
+# Build a Release macOS app and install it in /Applications (no Xcode UI needed)
+install-mac:
+    @command -v xcodegen >/dev/null || { echo "xcodegen not found: brew install xcodegen"; exit 1; }
+    cd mac && xcodegen
+    xcodebuild -project mac/Volley.xcodeproj -scheme Volley -configuration Release \
+        -derivedDataPath mac/build build
+    -pkill -x Volley
+    rm -rf /Applications/Volley.app
+    cp -R mac/build/Build/Products/Release/Volley.app /Applications/
+    open /Applications/Volley.app
+
 # Run Android and macOS unit tests
 test: test-android test-mac
 

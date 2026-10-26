@@ -42,6 +42,11 @@ composition root (`AppGraph` on Android, `Composition` on the Mac).
 brew install xcodegen
 cd mac && xcodegen && open Volley.xcodeproj
 ```
+To install it in `/Applications` without opening Xcode, run `just install-mac` (or build with
+`xcodebuild -project Volley.xcodeproj -scheme Volley -configuration Release -derivedDataPath build build` and copy
+`build/Build/Products/Release/Volley.app` there). The build is ad-hoc signed, so if macOS blocks the first launch,
+right-click the app and choose Open. To start it at login, add it under System Settings → General → Login Items.
+
 Run it, then click the arc icon in the menu bar and choose **Pair a phone**. Allow notifications and local network access when macOS asks.
 Choose **Open Volley** for the messages window: your phone's battery, charging, cell and Wi-Fi status,
 today's conversations (texts, MMS group chats and photos), and a chat view to reply. Group chats show who
